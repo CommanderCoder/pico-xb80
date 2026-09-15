@@ -1,0 +1,8 @@
+build
+!.vscode/*
+**.lst
+**.bin
+.DS_Store
+.cache/*
+minicom.cap
+tools/bin2mzf

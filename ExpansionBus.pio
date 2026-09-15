@@ -1,0 +1,163 @@
+/*
+
+PIO state machine programs for handling operations on the Z80 bus,
+using 16 pins for address, 8 pins for read/write data and 4 pins for control
+on a RP2350B
+
+
+ideas from copilot
+https://copilot.microsoft.com/shares/5pAqiwKpG3UoPwfFo242L
+
+
+*/
+
+// Z80 bus signals
+// Data on GPIO [16..23]
+// Control on GPIO [28..31]
+// Address on GPIO [32..47]
+.define public PIN_D0 16         ; base of 8-bit data bus
+.define public PIN_NWR 28       ; active low write / GREY
+.define public PIN_NRD 29       ; active low read / WHITE
+.define public PIN_NMREQ 30     ; Active Low, Memory Request / BLACK
+.define public PIN_NIOREQ 31    ; Active Low, IO Request / BROWN
+.define public PIN_A0 32         ; base of 16-bit address bus
+
+.define ADDR_DELAY 12
+
+; NOTE - NMREQ/NIOREQ are wired in (captured in the 32-pin snapshot in
+; eb2_write, see below) but neither program actually branches on them: both
+; eb2_read and eb2_write trigger purely off NRD/NWR and decode the full
+; 16-bit address, so a Z80 memory access and an IO access that happen to
+; share the same low byte are handled identically today. If the transfer
+; protocol moves to IN/OUT-based IOREQ cycles (see the note by
+; Z80_TO_PICO_DATA in "Z80 Asm/FD_rom1.s"), gate these loops on
+; `wait 0 gpio, PIN_NIOREQ` and drop the address capture down to 8 bits
+; (A0-A7) - simpler decode here, and it frees the Pico-side table in
+; ExpansionBus.h from a 64K-entry shadow down to <=256 entries.
+
+
+
+
+
+; - SM1: combined handler
+.program eb2_read
+.wrap_target
+loop:  wait    1 gpio, PIN_NRD
+       wait    0 gpio, PIN_NRD        
+
+        mov     isr, x        ; push top 15 bits of the buffer address (in X) onto ISR
+        in      pins, 16       ; A0-A15
+        in      null, 1                  ; - 17 bits
+        push    noblock                 ; clears the ISR after pushing
+
+
+
+
+        pull block                  ; pull into OSR, block if nothing in TX FIFO
+
+        out     pins, 8             ; pre-load pin output latch with data byte - set up to be pins 16... for data
+                                    ; safe while pins are inputs - value is latched ready
+        out     y, 1                     ; get the read-enabled flag
+        jmp     !y loop ; no read enable if y is 0
+
+    // READ
+        mov     osr,  !null
+        out     pindirs, 8          ; set direction to output
+
+        wait 1 pin PIN_NRD
+
+        mov     osr,  null
+        out     pindirs, 8          ; data pins → INPUT (high-Z)
+
+.wrap
+
+
+
+.program eb2_write
+.wrap_target
+startw:
+
+    wait    1 gpio, PIN_NWR
+    wait    0 gpio, PIN_NWR
+
+
+; set_in_pins begins at PIN_A0
+    mov     isr, x        ; push top 15 bits of the buffer address (in X) onto ISR
+    in      pins, 16       ; A0-A15, [ D0-D7, rsvd x4, controlbits x4 ]
+    in      null, 1                  ; - 17 bits
+    push    noblock                 ; don't block - it will be there.  clears the ISR after pushing
+
+    pull    block              ; pull into OSR — current 16-bit memory entry (permissions + data)
+    mov     isr, osr           ; keep an untouched backup of the original entry — used verbatim
+                                ; by push_backw below if this turns out to be a read-only location
+
+    ; Extract the WR-enable permission bit from the memory entry.
+    out     null, 9           ; discard data byte (8 bits) and RD-enable flag (1 bit)
+    out     y, 1              ; WR flag → Y  (1 = writable, 0 = read-only)
+
+    ; pushes the original entry back so write_data_chan
+    ; always completes and re-arms address_chan.
+    jmp     !y, push_backw     ; read-only location: skip write path, push original back
+
+    ; Writable: re-derive a clean copy of the permission byte from the untouched
+    ; backup in ISR (the two 'out's above already consumed the OSR copy of it).
+    mov     osr, isr
+    out     null, 8            ; discard old data byte
+    out     y, 8               ; Y = old permission byte — kept for the merge below
+
+    ; WARNING - tried and reverted, left here as a note for next time:
+    ;
+    ; wait_nwr_assert:
+    ;     jmp     pin, wait_nwr_assert   ; NWR still high -> not asserted yet, keep waiting
+    ;
+    ; The idea was to guard against sampling the bus before NWR is genuinely
+    ; asserted, in case the address-capture/pull round trip above takes longer
+    ; than the Z80's write pulse width. But this re-checks the LIVE pin with no
+    ; way to confirm it's still the SAME write cycle whose address we already
+    ; captured - if our round trip is slower than the gap between two
+    ; back-to-back Z80 writes (e.g. SNDBYTE's DATA write immediately followed
+    ; by its FLAG write), this can catch a LATER write's pulse instead, and we
+    ; end up applying that write's data to the wrong (earlier-captured)
+    ; address. Suspected cause of the intermittent "a write never lands"
+    ; failures seen testing *FDL. Removed; if data corruption/mistiming shows
+    ; up again, look here first before re-adding a live NWR re-check.
+
+    mov     osr,  null
+    out     pindirs, 32       ; address, data + control pins → INPUT (high-Z)
+
+ ; Full 32-pin window capture (base = PIN_A0/offset16, wraps around):
+    ;   bits 0-15  = A0-A15   (unused here)
+    ;   bits 16-23 = D0-D7
+    ;   bits 24-27 = reserved
+    ;   bit  28    = NWR
+    ;   bit  29    = NRD
+    ;   bit  30    = NMREQ
+    ;   bit  31    = NIOREQ
+    in      pins, 32
+
+    ; Drop the low 16 bits (A0-A15) so D0-D7+control land back in
+    ; bits[15:0] — same layout the rest of this program already expects.
+    mov     osr, isr
+    out     null, 16 ; out is configured to shift right
+
+    ; Merge the freshly-sampled data byte (now in OSR's low 8 bits) with the
+    ; preserved permission byte (Y) into the final entry: [perm(15:8):data(7:0)].
+    mov     isr, y
+    in      osr, 8
+
+    push    noblock            ; ISR (perm:data) → RX FIFO → write_data_chan writes it into _eb_memory
+    jmp     startw
+
+push_backw:
+
+    push    noblock           ; ISR (original entry, untouched) → RX FIFO → write_data_chan re-arms chain
+
+.wrap
+
+
+
+
+
+
+
+

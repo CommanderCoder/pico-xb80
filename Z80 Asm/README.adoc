@@ -1,0 +1,40 @@
+# assembling
+
+use sjasmplus
+
+https://z00m128.github.io/sjasmplus/documentation.html
+
+https://github.com/z00m128/sjasmplus/blob/master/INSTALL.md
+
+
+# for the test
+
+To assemble and get a hex dump for C
+
+```
+../tools/sjasmplus test.s --lst
+
+hexdump -v -e '8/1 "0x%02x, " "\n"' test.bin
+```
+
+
+# on MZ80K Monitor to execute use
+
+```
+*GOTO$F000
+```
+
+## or
+
+```
+*FD
+```
+
+
+#  in Z80 folder
+
+```
+cmake clean
+cmake -S . -B build
+cmake --build build
+```

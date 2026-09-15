@@ -1,0 +1,127 @@
+/*
+
+PIO state machine programs for handling operations on the 6502 bus.
+
+Copyright 2021-2025 Chris Moulang
+
+This file is part of Atom-DVI
+
+Atom-DVI is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+Atom-DVI is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+Atom-DVI. If not, see <https://www.gnu.org/licenses/>.
+
+*/
+
+// 6502 bus signals
+.define public PIN_A0 2         ; also A8 or D0 depending on mux settings
+.define public PIN_1MHZ 11
+.define public PIN_R_NW 10
+
+// mux control pins
+.define public PIN_MUX_ADD_LOW 28
+.define public PIN_MUX_ADD_HIGH 27
+.define public PIN_MUX_DATA 26
+
+// mux bit masks
+.define ADLO 0b011
+.define ADHI 0b101
+.define DATA 0b110
+.define NONE 0b111
+
+.define ADDR_DELAY 12
+
+.program eb2_addr_65C02
+; calculates a pico address from the 6502's address and pushes it to the DMA channel
+; pico_address = buffer_address + (6502_address * 2)
+; (* 2 because we need the u16 that contains the read/write flags AND data)
+; 
+; x = top 15 bits of pico dma buffer (set by pio_sm_exec)
+;
+.side_set 3 opt
+.wrap_target
+loop:   wait    1 gpio, PIN_1MHZ
+        wait    0 gpio, PIN_1MHZ         ; wait for 1 -> 0
+        set     pindirs, 0    side NONE  ; reset the mux, set all 32 pins to input
+        mov     isr, x        side ADHI
+
+        set     y, ADDR_DELAY
+delay:  jmp     y--, delay
+
+        in      pins, 8       side ADLO [1]
+        nop                             [1]
+        nop
+
+        in      pins, 8                  ; A0-A7
+        in      null, 1                  ; auto push - 17 bits
+        push    noblock
+.wrap
+
+.program eb2_addr_other
+; calculates a pico address from the 6502's address and pushes it to the DMA channel
+; pico_address = buffer_address + (6502_address * 2)
+; (* 2 because we need the u16 that contains the read/write flags AND data)
+; 
+; x = top 15 bits of pico dma buffer (set by pio_sm_exec)
+;
+.side_set 3 opt
+.wrap_target
+loop:   wait    1 gpio, PIN_1MHZ
+        wait    0 gpio, PIN_1MHZ         ; wait for 1 -> 0
+        set     pindirs, 0    side NONE  ; reset the mux
+        mov     isr, x        side ADHI
+
+        wait    1 gpio, PIN_1MHZ
+
+        in      pins, 8       side ADLO [1]
+        nop                             [1]
+        nop
+
+        in      pins, 8                  ; A0-A7
+        in      null, 1                  ; auto push - 17 bits
+        push    noblock
+.wrap
+
+
+.program eb2_access
+; receives a 16bit word containg read/write flags + data from DMA
+; if read && read-eabled is set then outputs data to 6502 bus
+; if write && wite-enabled is set then gets data from 6502 bus and pushes to DMA
+.side_set 3 opt
+.wrap_target
+loop:
+        pull    block                    ; get the flags + data into the OSR from the TXFIFO - from the CPU
+        out     pins 8        side NONE  ; set up the data in case it's a read : move 8 bits in OSR to pins
+        out     y, 1                     ; get the read-enabled flag : move remaining bit to y
+        jmp     pin, read                ; jmp if 6502 read - that is look at the jmp_pin (from sm_config) and if it is high, jump to read
+; Process 6502 write
+write:
+        out     y, 1                     ; get the write-enabled flag
+        jmp     !y, loop                 ; jmp if no write access to this address
+        wait 1 gpio PIN_1MHZ  side DATA
+        wait 0 gpio PIN_1MHZ             ; wait for 1 -> 0
+        in      pins 8
+        jmp     loop
+read:
+; Process 6502 read
+        jmp     !y, snoop                ; jmp if no read access to this address
+        mov     osr, !null               ; was allowed read access to this address, so move all 1s to OSR
+        out     pindirs 8     side DATA  ; move 8 bits from OSR to set the pin direction, (1 means output), and prep the mux with 0x110 for data transfer
+        jmp loop
+;
+; BIG NOTE
+; We don't have GPIO control of the DIR pin on the data mux ic 
+; so we can't snoop the data bus when the 6502 reads from a peripheral
+snoop:                                   
+        out     y, 1                     ; move a bit from OSR into y, and again
+        out     y, 1                     ; get the snoop flag
+        jmp     !y, loop                 ; jmp if no snoop on this address
+        in      null 8                   ; shift 8 bits to the ISR, from null
+.wrap

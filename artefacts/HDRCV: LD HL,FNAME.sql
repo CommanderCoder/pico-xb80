@@ -1,0 +1,169 @@
+HDRCV:	LD		HL,FNAME
+		LD		B,11H
+HDRC1:	CALL	RCVBYTE
+		LD		(HL),A
+		INC		HL
+		DEC		B
+		JR		NZ,HDRC1
+		LD		DE,MSG_LD
+		CALL	MSGPR
+		LD		DE,FNAME
+		CALL	MSGPR
+		CALL	LETLN
+		LD		HL,SADRS
+		CALL	RCVBYTE
+		LD		(HL),A
+		INC		HL
+		CALL	RCVBYTE
+		LD		(HL),A
+		LD		HL,FSIZE
+		CALL	RCVBYTE
+		LD		(HL),A
+		INC		HL
+		CALL	RCVBYTE
+		LD		(HL),A
+		LD		HL,EXEAD
+		CALL	RCVBYTE
+		LD		(HL),A
+		INC		HL
+		CALL	RCVBYTE
+		LD		(HL),A
+		RET
+
+
+DBRCV:	LD		DE,(FSIZE)
+		LD		HL,(SADRS)
+DBRLOP:	CALL	RCVBYTE
+		LD		(HL),A
+		DEC		DE
+		LD		A,D
+		OR		E
+		INC		HL
+		JR		NZ,DBRLOP
+		RET
+
+
+
+MLHED:
+		DI
+		PUSH	DE
+		PUSH	BC
+		PUSH	HL
+
+
+		LD		A,00H
+		LD		DE,0000H
+		CALL	TIMST
+
+		LD		B,08H
+		LD		DE,LBUF
+		LD		A,0DH
+MLH0:	LD		(DE),A
+		INC		DE
+		DEC		B
+		JR		NZ,MLH0
+
+		LD		A,03H
+		LD		(DSPX),A
+		LD		A,0C7H
+		CALL	DPCT
+		CALL	DPCT
+		CALL	DPCT
+MLH6:	LD		DE,MSG_DNAME
+		CALL	MSGPR
+		LD		A,09H
+		LD		(DSPX),A
+
+		LD		DE,MBUF
+		CALL	GETL
+
+		LD		DE,MBUF+9
+
+		LD		A,(DE)
+
+		CP		'*'
+		JR		Z,MLHCMD
+
+		LD		A,93H
+		CALL	MCMD
+		AND		A
+		JP		NZ,MERR
+
+MLH1:	LD		A,(DE)
+		CP		20H
+		JR		NZ,MLH2
+		INC		DE
+		JR		MLH1
+
+MLH2:	LD		B,20H
+MLH4:	LD		A,(DE)
+		CALL	SNDBYTE
+		INC		DE
+		DEC		B
+		JR		NZ,MLH4
+		LD		A,0DH
+		CALL	SNDBYTE
+
+		CALL	RCVBYTE
+		AND		A
+		JP		NZ,MERR
+
+		CALL	RCVBYTE
+		AND		A
+		JP		NZ,MERR
+
+		LD		HL,IBUFE
+		LD		B,80H
+MLH5:	CALL	RCVBYTE
+		LD		(HL),A
+		INC		HL
+		DEC		B
+		JR		NZ,MLH5
+
+		CALL	RCVBYTE
+		AND		A
+		JP		NZ,MERR
+
+		JP		MRET
+
+
+
+
+; Routine: MLDAT
+; Purpose: MONITOR load data routine - invoked from MLHED load sequence.
+;          Receives file data block from device into memory via DBRCV.
+; Inputs: protocol-driven, FSIZE and SADRS prepared by MLHED
+; Outputs: receives data via DBRCV, reports result
+; Clobbers: A, HL, B, DE
+MLDAT:
+		DI
+		PUSH	DE
+		PUSH	BC
+		PUSH	HL
+		LD		A,94H
+		CALL	MCMD
+		AND		A
+		JP		NZ,MERR
+
+		CALL	RCVBYTE
+		AND		A
+		JP		NZ,MERR
+
+		CALL	RCVBYTE
+		AND		A
+		JP		NZ,MERR
+
+		LD		DE,FSIZE
+		LD		A,(DE)
+		CALL	SNDBYTE
+		INC		DE
+		LD		A,(DE)
+		CALL	SNDBYTE
+		CALL	DBRCV
+
+		CALL	RCVBYTE
+		AND		A
+		JP		NZ,MERR
+
+		JR		MRET
+
