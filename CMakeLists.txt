@@ -28,7 +28,7 @@ set(PICO_BOARD olimex_rp2350_xxl CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(ExpansionBus C CXX ASM)
+project(pico-xb80 C CXX ASM)
 
 # Build the helper utility used to convert raw binary data into MZF format.
 # This must use the host compiler instead of the Pico ARM toolchain so it
@@ -37,8 +37,8 @@ find_program(HOST_C_COMPILER NAMES cc gcc clang REQUIRED)
 set(BIN2MZF_BINARY "${CMAKE_CURRENT_LIST_DIR}/tools/bin2mzf")
 add_custom_command(
     OUTPUT "${BIN2MZF_BINARY}"
-    COMMAND "${HOST_C_COMPILER}" "${CMAKE_CURRENT_LIST_DIR}/tools/bin2mzf.c" -O2 -o "${BIN2MZF_BINARY}"
-    DEPENDS "${CMAKE_CURRENT_LIST_DIR}/tools/bin2mzf.c"
+    COMMAND "${HOST_C_COMPILER}" "${CMAKE_CURRENT_LIST_DIR}/sharp-mz80k/tools/bin2mzf.c" -O2 -o "${BIN2MZF_BINARY}"
+    DEPENDS "${CMAKE_CURRENT_LIST_DIR}/sharp-mz80k/tools/bin2mzf.c"
     COMMENT "Building native bin2mzf converter"
     VERBATIM
 )
@@ -49,29 +49,27 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(ExpansionBus 
-    ExpansionBus.c 
-    MZ80K_SD.cpp
+add_executable(pico-xb80 
+    pico-xb80.cpp
+    xb_interface/xb_if.c 
     fatfs/ff.c
     fatfs/ffunicode.c
     sdcard/sd_card.cpp
 )
 
-pico_set_program_name(ExpansionBus "ExpansionBus")
-pico_set_program_version(ExpansionBus "0.1")
+pico_set_program_name(pico-xb80 "pico-xb80")
+pico_set_program_version(pico-xb80 "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(ExpansionBus 0)
-pico_enable_stdio_usb(ExpansionBus 1)
+pico_enable_stdio_uart(pico-xb80 0)
+pico_enable_stdio_usb(pico-xb80 1)
 
 # Generate PIO header from .pio file
-pico_generate_pio_header(ExpansionBus ${CMAKE_CURRENT_LIST_DIR}/ExpansionBus.pio)
+pico_generate_pio_header(pico-xb80 ${CMAKE_CURRENT_LIST_DIR}/xb_interface/xb_if.pio)
 
 # Generate ROM data header from assembly file
 set(ROM_ASM_SOURCE 
-    # "${CMAKE_CURRENT_LIST_DIR}/Z80 Asm/FD_rom.s"
-    "${CMAKE_CURRENT_LIST_DIR}/Z80 Asm/FD_rom1.s"
-    # "${CMAKE_CURRENT_LIST_DIR}/Z80 Asm/FD_rom2.s"
+    "${CMAKE_CURRENT_LIST_DIR}/sharp-mz80k/FD_rom.s"
     )
 set(ROM_BIN_OUTPUT ${CMAKE_BINARY_DIR}/FD_rom.bin)
 set(ROM_HEADER_OUTPUT ${CMAKE_CURRENT_LIST_DIR}/FD_rom.h)
@@ -79,13 +77,13 @@ set(ROM_HEADER_OUTPUT ${CMAKE_CURRENT_LIST_DIR}/FD_rom.h)
 add_custom_command(
     OUTPUT "${ROM_BIN_OUTPUT}" "${ROM_HEADER_OUTPUT}"
     # 1. Set the working directory properly for all commands
-    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/Z80 Asm"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/sharp-mz80k"
 
 # 2. Quote paths to tools and outputs to safely handle the space in "Z80 Asm"
     # COMMAND "${CMAKE_CURRENT_LIST_DIR}/tools/sjasmplus" FD_rom1.s --lst --raw=FD_rom1.bin
     # COMMAND "${CMAKE_CURRENT_LIST_DIR}/tools/sjasmplus" FD_rom2.s --lst --raw=FD_rom2.bin
     # COMMAND "${CMAKE_CURRENT_LIST_DIR}/tools/sjasmplus" FD_rom.s --lst --raw=${ROM_BIN_OUTPUT}
-    COMMAND "${CMAKE_CURRENT_LIST_DIR}/tools/sjasmplus" FD_rom1.s --lst --raw=${ROM_BIN_OUTPUT}
+    COMMAND "${CMAKE_CURRENT_LIST_DIR}/tools/sjasmplus" FD_rom.s --lst --raw=${ROM_BIN_OUTPUT}
     COMMAND python3 "${CMAKE_CURRENT_LIST_DIR}/tools/bin2header.py" "${ROM_BIN_OUTPUT}" "${ROM_HEADER_OUTPUT}"
     
 # 3. Quote the list variable so CMake expands it correctly
@@ -95,21 +93,21 @@ add_custom_command(
 )
 
 add_custom_target(rom_data_header DEPENDS ${ROM_HEADER_OUTPUT})
-add_dependencies(ExpansionBus rom_data_header)
+add_dependencies(pico-xb80 rom_data_header)
 
 # Add the standard library to the build
-target_link_libraries(ExpansionBus
+target_link_libraries(pico-xb80
         pico_stdlib
         pico_rand
         hardware_pio 
         hardware_dma)
 
 # Add the standard include files to the build
-target_include_directories(ExpansionBus PRIVATE
+target_include_directories(pico-xb80 PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_CURRENT_LIST_DIR}/sdcard
         ${CMAKE_CURRENT_LIST_DIR}/fatfs
 )
 
-pico_add_extra_outputs(ExpansionBus)
+pico_add_extra_outputs(pico-xb80)
 

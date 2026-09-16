@@ -3,7 +3,8 @@
   Expansion Bus Interface for Z80 bus
   using PIO and DMA on the RP2350B (Olimex Pico2-XXL)
 
-  Inspired by the work of Chris Moulang on the Atom-DVI project, and adapted for the Z80 bus by Andrew Hague.
+  Inspired by the work of Chris Moulang on the Atom-DVI project, 
+  and adapted for the Z80 bus by Andrew Hague.
 */
 
 /*
@@ -36,7 +37,7 @@ Atom-DVI. If not, see <https://www.gnu.org/licenses/>.
 #include "hardware/pio.h"
 #include "hardware/watchdog.h"
 #include "hardware/clocks.h"
-#include "ExpansionBus.pio.h"
+#include "xb_if.pio.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -68,7 +69,7 @@ extern "C"
 {
 #endif
 
-// Sized in ExpansionBus.c (currently EB_BUFFER_LENGTH plus a few guard
+// Sized in xb_if.c (currently EB_BUFFER_LENGTH plus a few guard
 // elements used by a temporary diagnostic) — declared without a bound here so
 // this doesn't need to track that.
 //
@@ -79,7 +80,7 @@ extern "C"
 // side moves to IN/OUT (IOREQ) for the handshake instead of LD (nn) (MREQ),
 // this table only needs to cover the 8-bit I/O port space (<=256 entries)
 // - a large RAM and address-decode simplification. See the matching note in
-// ExpansionBus.pio next to PIN_NMREQ/PIN_NIOREQ.
+// xb_if.pio next to PIN_NMREQ/PIN_NIOREQ.
 extern volatile uint16_t _Alignas(EB_BUFFER_LENGTH * 2) _eb_memory[] __attribute__((section(".uninitialized_dma_buffer")));
 extern uint eb_event_chan;
 

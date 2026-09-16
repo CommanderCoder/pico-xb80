@@ -4,5 +4,4 @@ build
 **.bin
 .DS_Store
 .cache/*
-minicom.cap
-tools/bin2mzf
+tools/sjasmplus

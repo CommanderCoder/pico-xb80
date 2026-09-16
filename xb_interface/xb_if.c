@@ -1,6 +1,6 @@
 /* Heavily based on ATOM-DVI EB methods */
 
-#include "ExpansionBus.h"
+#include "xb_if.h"
 #include "pico/rand.h"
 
 #include "FD_rom.h"

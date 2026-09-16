@@ -1033,12 +1033,12 @@ PICO_TO_Z80_FLAG    EQU 0FFFDh
 ; NOTE - IOREQ vs MREQ (worth revisiting):
 ; RCVBYTE/SNDBYTE below talk to these four addresses purely with
 ; `LD A,(nn)`/`LD (nn),A`, i.e. every handshake byte is a Z80 *memory* access
-; (MREQ), never an IOREQ - the PIO side (ExpansionBus.pio) samples NMREQ/
+; (MREQ), never an IOREQ - the PIO side (xb_if.pio) samples NMREQ/
 ; NIOREQ but doesn't currently gate on either, so it can't tell the two apart
 ; anyway. Four scattered 16-bit addresses (0xFCF0/0xFDF2/0xFEF4/0xFFF6) also
 ; have to live inside the Z80's normal 64K memory map, so real RAM/ROM must
 ; carefully avoid them, and the Pico side needs a full 64K-entry shadow table
-; (_eb_memory, see ExpansionBus.h) just to decode which of these few
+; (_eb_memory, see xb_if.h) just to decode which of these few
 ; addresses is being hit.
 ;
 ; Re-doing this handshake with IN/OUT to a handful of 8-bit I/O ports instead

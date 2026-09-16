@@ -4,14 +4,14 @@
 #include "pico/stdlib.h"
 
 #include "ff.h"
-#include "sdcard/fatfs_interface.h"
+#include "fatfs_interface.h"
 
-#include "ExpansionBus.h"
+#include "xb_interface/xb_if.h"
 
 // File operation mode constants
 constexpr uint FILE_READ = 0;
 constexpr uint FILE_WRITE = 1;
-constexpr char* ROOT_DIR = "/MZ_FD"; // Root directory for MZF files
+constexpr char ROOT_DIR[12] = "/MZ_FD"; // Root directory for MZF files
 
 // Forward declarations of FATFS object
 static class FatFsInterface* g_fatfs = nullptr;

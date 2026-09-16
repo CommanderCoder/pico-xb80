@@ -1,123 +1,158 @@
-# PICO tools to upload the 
+# pico-xb80
+
+The pico-xb80 is an expansion bus (external bus, extended board) for late 1970's and early 1980's desktop computers.  Computers currently supported are:
+* [Sharp MZ80K](https://en.wikipedia.org/wiki/Sharp_MZ)
+
+And computers which could be supported with a little effort:
+* [Tandy TRS-80 and clones](https://en.wikipedia.org/wiki/List_of_TRS-80_clones)
 
 
-cmake -S . -B build -G Ninja
+# Introduction
+
+## The hardware
+
+Off-the-shelf components are used for this project to keep it accessible to anyone.
+
+* Pico 2350B and SD Card slot mounted on the [Olimex Pico2-XXL](https://www.olimex.com/Products/RaspberryPi/PICO/PICO2-XXL/open-source-hardware)
+* Appropriate ribbon cable and jumper wires to connect the computer to the Olimex board.
+  * Sharp MZ80K uses a [50-Way SCSI](https://www.google.com/search?q=50+way+ribbon+cable) 
+  * [DuPont or similar](https://en.wikipedia.org/wiki/Jump_wire)
+
+*In future* it is possible a single board with RP2350B with the SD card slot and 50 Way socket will become the wrap this into a single board.  For now, the Olimex is available for anyone wanting to experiment.
+
+## The software:
+* 1-bit SD Card interface software (initially from prompts to Claude.ai).  The Olimex Pico2-XXL has two variants.  One use 1-bit communication protocol and the other uses the 4-bit protocol.  My board used 1-bit so the software is built for this.
+* `fatfs` module by ChaN
+* Expansion Bus - provides a shared memory on the address bus.  [Pico PIOs](https://www.raspberrypi.com/news/what-is-pio/) rapidly reads addresses and data which several DMAs pump in and out of 64Kx16bit words (128Kb).
+  * heavily influenced by [ATOM-DVI](https://github.com/cmoulang/Atom-DVI) after speaking with Chris about his project at an ABUG event. 
+* pico-xb80_mz80k - the specific Sharp MZ80K interface.  
+  * Z80 *ROM* this is shared on the bus at `0xF000` so that the Monitor ROM can jump to it with an `*FD` command.
+  * Mailbox addresses so that the Z80 can send and receive commands and data to/from the Pico
+  * Communcation with the SD card via the SD Card interface and `fatfs`
+
+## Development Environment
+* VSCode
+* Raspberry Pi Pico extension ([SDK docs](https://pip-assets.raspberrypi.com/categories/610-raspberry-pi-pico/documents/RP-008276-DS-2-getting-started-with-pico.pdf))
+* [git in VSCode](https://code.visualstudio.com/docs/sourcecontrol/overview) 
+* Python 3
+
+
+### Z80 Code
+> **IMPORTANT:** You will need to compile your own version of `sjasmplus` for your platform.
+
+* [sjasmplus](https://github.com/z00m128/sjasmplus) - assemble the Z80 code into a machine code binary
+* bin2header.py - convert a binary file to a header file that can be included as part of the Pico executable
+
+## Tools
+Some Python tools were created using prompts to Claude.ai.
+
+- `filehandle_path.py` - This tool will search any Sharp MZ80K file binary for calls to the tape handlers in the Monitor ROM and replace them with calls to the SD handlers in the ROM.
+
+- `mz_tape_info.py` - This tool will scan any Sharp MZ80K files and determine their file type and whether they have already been patched.
+
+
+# Build Instructions
+
+## Wiring
+
+Only the right column of pins are used from EXT1 and EXT2 on the Olimex board.  
+
+<div style="display: flex; gap: 1rem;">
+  <div style="flex: 1;">
+
+| Olimex EXT1 | MZ80K | XB Signal |
+|----------|----------|----------|
+| P1 | nc | |
+| P3 | A25 (mark) | D0 |
+| P5 | A24 | D1 |
+| P7 | A23 | D2 |
+| P9 | A22 | D3 |
+| P11 | A21 | D4 |
+| P13 | A20  | D5 |
+| P15 | A19 | D6 |
+| P17 | A18 | D7 |
+| P19 | nc | |
+| P21 | nc | |
+| P23 | nc | |
+| P25 | nc | |
+| P27 | nc | |
+| P29 | nc | |
+| P31 | B10 | NWR |
+| P33 | B8 | NRD |
+| P35 | B6 | NMREQ |
+| P37 | B4 | NIOREQ |
+| P39 | B3 | GND |
+
+  </div>
+
+  <div style="flex: 1;">
+
+| Olimex EXT2 | MZ80K | Signal |
+|----------|----------|----------|
+| P1 | nc |  |
+| P3 | A16  | A0 |
+| P5 | A15  | A1 |
+| P7 | A14  | A2 |
+| P9 | A13 | A3 |
+| P11 | A12  | A4 |
+| P13 | A11  | A5 |
+| P15 | A10  | A6 |
+| P17 | A9  | A7 |
+| P19 | nc |  |
+| P21 | nc |  |
+| P23 | A8  | A8 |
+| P25 | A7  | A9 |
+| P27 | A6  | A10 |
+| P29 | A5  | A11 |
+| P31 | A4  | A12 |
+| P33 | A3 | A13 |
+| P35 | A2 | A14 |
+| P37 | A1 | A15 |
+| P39 | nc |  |
+
+  </div>
+</div>
+
+![sharp-mz80k-bus-pins](sharp-mz80k/mz80k-bus-pins.png)
+
+## Uploading
+
+Put the Olimex into Boot Mode.
+* Hold down the BOOT button and connect the Olimex to your laptop via USB.  
+
+Use Visual Studio Code to upload the code to the Pico.
+* Select **Run Project (USB)** from the Project menu in the Pico extension.
 
 
 
-# ARDUINO-CLI tool to upload to arduino
+## SD Card
 
-# List all available boards
-arduino-cli board listall | grep -i mega
+Create a USB card with a folder in root named `MZ_FD`.  Inside this place the files you want to access.  Use the extension `.MZF` .  The file `0000.MZF` will be loaded whenever `*FD` is used from the Monitor.  
 
-# Detect connected boards
-arduino-cli board list
+### Patching
 
+Since the Monitor ROM is cannot be modified in software, a replacement ROM would be required to jump to file handling subroutines within the FD_rom.
 
-cd arduino_eb_test
-arduino-cli compile --fqbn arduino:avr:mega arduino_eb_test.ino
+In leui of this, it is simpler to patch programs which use tape file handling to jump to the FD_rom subroutines instead.
 
-arduino-cli upload -p /dev/cu.usbserial-0001 --fqbn arduino:avr:mega arduino_eb_test.ino
+You can determine which files use file handling with `mz_tape_info.py`.  You can then patch those necessary with `filehandle_path.py` 
 
-# build arduino mega - mimics the Z80 cpu
-ARDUINO_PORT=/dev/cu.usbserial-0001
-arduino-cli compile --upload -p "$ARDUINO_PORT" --fqbn arduino:avr:mega arduino_eb_test.ino && arduino-cli monitor -c 115200 -b arduino:avr:mega -p "$ARDUINO_PORT"
+## Power
 
+Either continue to use your Laptop USB power, or simply plug the Olimex into a USB power supply.
 
-# to view the output
+# Operating Instructions
 
-# from pico
-minicom -b 115200 -D /dev/tty.usbmodem1101
-
-# from arduino
-minicom -b 115200 -D /dev/cu.usbserial-0001
-
-or
+See [here for instructions](OPERATING.md) for how to use pico-xb80 from the Sharp Monitor rom.
 
 
-arduino-cli monitor -p /dev/cu.usbserial-0001 -c 115200 -b arduino:avr:mega
+# Reference & Acknowledgements
 
+Thank you to:
 
-# build Z80
-
-./sjasmplus test.s --lst && hexdump -v -e '8/1 "0x%02x, " "\n"' test.bin > rom1.h 
-
-
-https://mz-80a.com/Files/Manuals/Monitor-Disassembly-80K.pdf
-
-
-	
-	; just show a message...
-	    LD   DE, MSG_LD1
-        CALL MSGPR
-        CALL NEWLIN
-        LD   DE, MSG_LD2
-        CALL MSGPR
-		CALL LETLN
-        JP   MON  ; Jump back to Monitor instead of RET
-
-CURSORHOME		EQU		16H ; clear screen
-
-MSG_LD1: DB   CURSORHOME, 'HELLO ANDREW AND KAREN', 0DH
-MSG_LD2: DB   'THIS PROGRAM IS SITTING INSIDE MY LITTLE BOX', 0DH
-
-
-# MZ80K Memory Map
-
-RAM - 48K runs from 0x1000-0xCFFF (0xC000 bytes or 49152)
-Workspace RAM for Monitor - 0x1000-0x11FF
-RAM for programs 0x1200-0xcfff
-
-## Basic
-0x1200-0x4806
-
-## Monitor
-0x0000-0x0fff
-
-## Video
-0xD000-0xD3FF
-Only 1000 locations seen. The other 24 are never shown
-The locations are repeated 4 times, so making the 4096 addresses up to DFFF
-
-MZ80A has 2k of video ram but each 1k selected in a special way.
-
-## Memory Expansion & Addressing
-
-## I/O At $E000 Locations
-
-E000 keyboard driver
-E001 keyboard receiver
-E002 read-curser timer, cassette sense
-E003 motor pulse, led
-
-*8522 PIA*
-E000 BEING PORT A
-E001 BEING PORT B
-E002 BEING PORT C
-E003 BEING THE CONTROL WORD
-
-all the peripherals ; 
-
-*8253 TIMER*
-E007 CONTROL WORD.
-E006 COUNTER 2
-E005 COUNTER 1
-E004 COUNTER 0
-
-*555 TEMPO TIMER*
-E008 timer
-
-### MZ80A EXTRAS
-E00C MEMORY MONITOR EXCHANGE
-E010  MEMORY MONITOR NORMAL
-E014 STADNARD SCREEN DISPLAY
-E015 REVERSE SCREEN DISPLAY
-E200-E2FF DISPLAY RAM
-
-
-_Maybe use 0xE300 for moving data to and from the PICO, But F000-FFFF is reserved and available_
-
-
-MZ80A - has user ram/rom slot addressed at E800-EFFF - if E800 is NULL then this rom will run on powerup
-..
-plenty more
+* https://github.com/yanataka60/MZ80K_SD
+* https://github.com/cmoulang/Atom-DVI
+* https://mz-80a.com/
+* https://mz-archive.co.uk/
+* https://www.sharpmz.net/
+* https://claude.ai/ and all the other AIs (Gemini, Co-Pilot, ChatGPT) that tried to find answers for me.
