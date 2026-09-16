@@ -8,7 +8,6 @@
 
 #include "xb_interface/xb_if.h"
 
-#include "sharp-mz80k/FD_rom.h"
 #include "sharp-mz80k/sharp_mz.h"
 
 // File operation mode constants
@@ -1517,20 +1516,12 @@ int main(void) {
 
     _DEBUG("Pico-XB80 for Sharp MZ80K v1.0.0\n");
 
-
-    // Initialise the FD Rom
-    const int fd_rom_start = 0xF000;
-    // initialise the shadow memory
-    for (int i = 0; i < EB_BUFFER_LENGTH; i++) {
-        if (i >= fd_rom_start && i <= fd_rom_start + fd_rom_size) {
-            _eb_memory[i] = fd_rom_data[i-fd_rom_start]; // data byte in lower 8 bits, permissions 0x01 (read-only) in upper 8 bits 
-        } else {
-            _eb_memory[i] = 0; // default to 0 with no permissions
-        }
-    }
-    
     // Initialize the SD card and FatFs
     start_xb_interface();
+
+    // Initialise the Sharp MZ series interface
+    SharpMZ_initialise();
+    
 
     // Start the command loop for Sharp MZ series commands
     SharpMZ_cmdloop();

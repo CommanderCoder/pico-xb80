@@ -535,6 +535,7 @@ static void eb_setup_dma_write(void)
 
 void wait_z80_mailbox_empty()
 {
+    // if ROM has loaded, the Z80 will have set the mailbox flag to 1, so we need to wait for it to clear before we can send a response
     _DEBUG("Waiting for empty recv mailbox from Z80...\n");
 
     // hold here while mailbox is not empty
@@ -542,6 +543,14 @@ void wait_z80_mailbox_empty()
     {
         sleep_ms(1);
     }
+
+
+    _DEBUG("Set empty snd mailbox to Z80...\n");
+    // initialize data for the communication area
+    eb_set(PICO_TO_Z80_DATA, 0);
+
+    // mark mailbox empty
+    eb_set(PICO_TO_Z80_FLAG, 0);
 }
 
 
@@ -577,9 +586,6 @@ void start_xb_interface()
 {
     eb_set_perm(0x0000, EB_PERM_NONE, 0x10000);
 
-    // the ROM
-    eb_set_perm(0xF000, EB_PERM_READ_ONLY, 0x1000); //0x01 0b0001
-
     // the SD card interface - for now just a simple command/status register, but could be expanded to include a data buffer and more control registers if needed
     eb_set_perm(Z80_TO_PICO_DATA, EB_PERM_READ_WRITE, 2); // SD card interface
     eb_set_perm(Z80_TO_PICO_FLAG, EB_PERM_READ_WRITE, 2); // SD card interface
@@ -589,16 +595,6 @@ void start_xb_interface()
     
     // PIOs claimed automatically
     eb_init();
-
-     // z80 empties first, then expects pico to empty
-    wait_z80_mailbox_empty();
-
-    _DEBUG("Set empty snd mailbox to Z80...\n");
-    // initialize data for the communication area
-    eb_set(PICO_TO_Z80_DATA, 0);
-
-    // mark mailbox empty
-    eb_set(PICO_TO_Z80_FLAG, 0);
 }
 
 

@@ -1,5 +1,6 @@
 #include "sharp_mz.h"
 #include "xb_interface/xb_if.h"
+#include "FD_rom.h"
 
 
 // PORTO at 0xE000 is the decoder which
@@ -30,4 +31,29 @@ void SharpMZ_cmdloop()
         mzcmd_commandwait();
     }
     
+}
+
+void SharpMZ_initialise()
+{
+    // Initialise the FD Rom
+    const int fd_rom_start = 0xF000;
+
+    assert(fd_rom_size <= 0x0ff9); // Cannot drift into the bytes used for the SD card interface (0xFFFA-0xFFFF)
+    // initialise the shadow memory
+    for (int i = 0; i < EB_BUFFER_LENGTH; i++) {
+        if (i >= fd_rom_start && i <= fd_rom_start + fd_rom_size) {
+            eb_set(i, fd_rom_data[i-fd_rom_start]); // data byte in lower 8 bits
+        } else {
+            eb_set(i, 0); // default to 0 
+        }
+    }
+
+    // the ROM - permissions 0x01 (read-only) in upper 8 bits
+    eb_set_perm(0xF000, EB_PERM_READ_ONLY, 0x0FF9);
+
+
+    // z80 empties first, then expects pico to empty - this means the
+    // ROM is ready to be read by the Z80 and the SD card interface is ready to be used
+    wait_z80_mailbox_empty();
+
 }
