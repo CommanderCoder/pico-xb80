@@ -8,6 +8,9 @@
 
 #include "xb_interface/xb_if.h"
 
+#include "sharp-mz80k/FD_rom.h"
+#include "sharp-mz80k/sharp_mz.h"
+
 // File operation mode constants
 constexpr uint FILE_READ = 0;
 constexpr uint FILE_WRITE = 1;
@@ -96,6 +99,7 @@ void print_current_file_diag(){
 #endif 
 }
 
+// SDCard slot pin assignments
 namespace {
   constexpr uint kClkPin = 10;
   constexpr uint kCmdPin = 11;
@@ -114,7 +118,7 @@ char m_name[40];
 char m_name_copy[130]; // includes path
 
 //File names support long filename format.
-boolean eflg = false;
+boolean support_lfn = false;
 
 void println(const char* str) {
     _DEBUG("%s\n", str);
@@ -127,7 +131,7 @@ void print(const char* str) {
 
 // Forward declarations
 boolean f_match(char *f_name, char *c_name);
-bool new_SdFat();
+bool InitSDFatFs();
 
 // TEMPORARY DIAGNOSTIC: list every .MZF file on the SD card directly on the
 // Pico side (no Z80/PIO involvement at all), to check the SD/FatFs listing
@@ -170,18 +174,18 @@ static void list_mzf_files_local(void)
 
 void sdinit(void){
   // SD system initialization
-  if( !new_SdFat() )
+  if( !InitSDFatFs() )
   {
     println("Failed : SD.begin");
-    eflg = true;
+    support_lfn = true;
   }
   else {
     println("OK : SD.begin");
-    eflg = false;
+    support_lfn = false;
   }
 println("START");
 
-  if (!eflg) {
+  if (!support_lfn) {
     list_mzf_files_local(); // TEMPORARY DIAGNOSTIC
   }
 }
@@ -219,6 +223,13 @@ void addmzf(char *f_name)
 }
 
 
+void addrootdir(char* f_name_copy, const char* f_name, size_t max_len)
+{
+  strncpy(f_name_copy, ROOT_DIR, max_len - 1);
+  strncat(f_name_copy, "/", max_len - strlen(f_name_copy) - 1);
+  strncat(f_name_copy, f_name, max_len - strlen(f_name_copy) - 1);
+}
+
 
 void rcv_block(char* buff, int size)
 {
@@ -240,7 +251,8 @@ void f_save()
   char f_name[40];
 
   rcv_filename32(f_name); 
-  addmzf(f_name);
+  addrootdir(m_name_copy, f_name, sizeof(m_name_copy));
+  addmzf(m_name_copy);
   
   // Get the program name
   for (unsigned int lp1 = 0; lp1 <= 16; lp1++)
@@ -276,13 +288,13 @@ void f_save()
   _DEBUG("save file length %d\n",f_length);
   // Delete the file if it exists
   FILINFO fno;
-  if (g_fatfs->exists(f_name,&fno) == FR_OK)
+  if (g_fatfs->exists(m_name_copy,&fno) == FR_OK)
   {
-    g_fatfs->remove(f_name);
+    g_fatfs->remove(m_name_copy);
   }
 
   // Open file for writing (this sets the 'current_file')
-  if (current_file.open(f_name, FILE_WRITE) >= 0)  // FILE_WRITE mode
+  if (current_file.open(m_name_copy, FILE_WRITE) >= 0)  // FILE_WRITE mode
   {
     // Sending status code (OK)
     sndbyte(0x00);
@@ -338,13 +350,6 @@ void f_save()
     sndbyte(0xF1);
     sdinit();
   }
-}
-
-void addrootdir(char* f_name_copy, const char* f_name, size_t max_len)
-{
-  strncpy(f_name_copy, ROOT_DIR, max_len - 1);
-  strncat(f_name_copy, "/", max_len - strlen(f_name_copy) - 1);
-  strncat(f_name_copy, f_name, max_len - strlen(f_name_copy) - 1);
 }
 
 void f_send(const char* f_name)
@@ -435,16 +440,18 @@ void f_load(void)
 // ASTART Copies the specified file as filename "0000.mzf"
 void astart(void)
 {
-  char w_name[] = "0000.mzf";
+  char w_name[50];
+  addrootdir(w_name, "0000.mzf", sizeof(w_name)); // prepend root directory to filename
 
   // Get filename
   char f_name[40];
   rcv_filename32(f_name);
-  addmzf(f_name);
+  addrootdir(m_name_copy, f_name, sizeof(m_name_copy)); // prepend root directory to filename
+  addmzf(m_name_copy);
   
   // Error if the file does not exist
   FILINFO fno;
-  if (g_fatfs->exists(f_name,&fno) == FR_OK)
+  if (g_fatfs->exists(m_name_copy,&fno) == FR_OK)
   {
     // If 0000.mzf exists, delete it
     FILINFO fno;
@@ -454,7 +461,7 @@ void astart(void)
     }
     
     // Open source file for reading
-    if (current_file.open(f_name, FILE_READ) >= 0)
+    if (current_file.open(m_name_copy, FILE_READ) >= 0)
     {
       // Get file size
       FSIZE_t f_length = current_file.size();
@@ -466,7 +473,7 @@ void astart(void)
       if (current_file_for_copy.open(w_name, FILE_WRITE) >= 0)
       {
         // Reopen source file for reading
-        current_file.open(f_name, FILE_READ);
+        current_file.open(m_name_copy, FILE_READ);
         
         // Copy data
         long lp1 = 0;
@@ -1057,52 +1064,6 @@ void f_copy(void)
   }
 }
 
-
-char hex_buffer[49];     // 16 bytes * 3 characters per byte ('AA ') + null terminator
-char ascii_buffer[17];   // 16 bytes + null terminator
-int buf_idx = 0;
-
-void hexreset()
-{
-  buf_idx = 0;
-}
-
-void hexend(uint8_t lp1)
-{
-  ascii_buffer[buf_idx] = '\0'; // Null-terminate
-  
-  // Print: [Offset] | [Hex Bytes] | [ASCII]
-  // (Using lp1 - 15 to show the start address of the current row)
-  _DEBUG("%04X  %s | %s |\n", lp1 - 15, hex_buffer, ascii_buffer);
-  
-  // Reset the buffer index for the next row
-  buf_idx = 0;
-}
-
-void hexcapture(uint8_t lp1, uint8_t i_data)
-{
-  // 1. Store the hex representation into our buffer
-    sprintf(&hex_buffer[buf_idx * 3], "%02X ", i_data);
-
-    // 2. Store the ASCII representation
-    ascii_buffer[buf_idx] = (i_data >= 32 && i_data <= 126) ? i_data : '.';
-
-    buf_idx++;
-
-    // 3. Once we hit 16 bytes (or the end of the data), print the row
-    if (buf_idx == 16) {
-        ascii_buffer[buf_idx] = '\0'; // Null-terminate
-        
-        // Print: [Offset] | [Hex Bytes] | [ASCII]
-        // (Using lp1 - 15 to show the start address of the current row)
-        _DEBUG("%04X  %s | %s |\n", lp1 - 15, hex_buffer, ascii_buffer);
-        
-        // Reset the buffer index for the next row
-        buf_idx = 0;
-    }
-
-}
-
 bool stillOpen=false;
 
 // //91h for 0436H MONITOR Light Information Alternative Processing
@@ -1138,18 +1099,16 @@ void mon_whead(void){
     // Sending status code (OK)
     sndbyte(0x00);
     
-    hexreset();
+
     // Information block write
     for (unsigned int lp1 = 0; lp1 < 128; lp1++){
       uint8_t byte_val = (uint8_t)m_info[lp1];
-        hexcapture(lp1, byte_val);
+     
       current_file.write(&byte_val, 1, &bw);
     }
-    hexend(15);
         _DEBUG("ok\n");
 
         stillOpen = true;
-    // current_file.close();
   } else {
     // Send status code (ERROR)
     sndbyte(0xF1);
@@ -1170,25 +1129,24 @@ void mon_wdata(void){
       _DEBUG("wl %u\n", f_length);
 
   // Open file for writing (append to existing file from mon_whead)
-  // if (current_file.open(m_name, FILE_WRITE) >= 0) {
   if (stillOpen) {
     // Sending status code (OK)
     sndbyte(0x00);
     
-    hexreset();
+
     // Actual data
     long lp1 = 0;
     while (lp1 < f_length){
       int i = 0;
       while (i < 256 && lp1 < f_length){
         s_data[i] = recbyte();
-        hexcapture(lp1, s_data[i]);
+
         i++;
         lp1++;
       }
       current_file.write(s_data, i, &bw);
     }
-    hexend(lp1);
+    
     _DEBUG("ok\n");
     
     stillOpen = false;
@@ -1224,16 +1182,13 @@ void mon_lhead(void){
       sndbyte(0x00);  // Another OK
     _DEBUG("ok\n");
       
-    // hexreset();
       // Read and send 128 bytes of header
       for (unsigned int lp1 = 0; lp1 < 128; lp1++){
         uint8_t i_data = current_file.readByte();
-        // hexcapture(lp1, i_data);
+
         sndbyte(i_data);
-        // _DEBUG("send %d\n",lp1);
 
         }
-    // hexend(15);
 
     sndbyte(0x00);  // Final OK
     _DEBUG("ok\n");
@@ -1272,8 +1227,6 @@ void mon_ldata(void){
 
     if (current_file.open(m_name_copy, FILE_READ) >= 0) {
 
-  // Open file again if needed (should already be open from mon_lhead)
-  // if (USING_FATFS) {
     sndbyte(0x00);  // Another OK
     _DEBUG("ok\n");
     
@@ -1286,17 +1239,13 @@ void mon_ldata(void){
     unsigned int f_length = f_length1 * 256 + f_length2;
     _DEBUG("l %u\n", f_length);
     
-    // hexreset(); 
+  
     // Send data
     for (unsigned int lp1 = 0; lp1 < f_length; lp1++){
-        // _DEBUG("recv %d\n",lp1);
+      
       uint8_t i_data = current_file.readByte();
       sndbyte(i_data);
-
-      // hexcapture(lp1, i_data);
-
     }
-    // hexend(15);
     
     // Update read position
     m_lop = m_lop + f_length;
@@ -1319,8 +1268,7 @@ else
 void boot(void){
 //Get filename
   rcv_filename32(m_name);
-//// print("m_name:");
-//// println(m_name);
+
 //Error if the file does not exist
   FILINFO fno;
   if (g_fatfs->exists(m_name,&fno) == FR_OK)
@@ -1336,9 +1284,6 @@ void boot(void){
       unsigned int f_len2 = f_length % 256;
       sndbyte(f_len2);
       sndbyte(f_len1);
-//// println(f_length,HEX);
-//// println(f_len2,HEX);
-//// println(f_len1,HEX);
 
 // Sending actual data
       for (unsigned long lp1 = 1;lp1 <= f_length;lp1++){
@@ -1359,7 +1304,7 @@ void boot(void){
 
 
 
-bool new_SdFat() {
+bool InitSDFatFs() {
 
   // already initialised
   if (g_fatfs != nullptr)
@@ -1404,98 +1349,6 @@ bool new_SdFat() {
 }
 
 
-// --- Helper Functions ---
-// Reads and prints the contents of a file as ASCII
-void dump_file_contents(const char* filename)
-{
-#if USBDEBUG
-    if (current_file.open(filename, 0) < 0) 
-    {
-        _DEBUG("Error opening %s\n", filename);
-        return;
-    }
-
-    _DEBUG("Contents of %s:\n", filename);
-    FSIZE_t f_length = current_file.size();
-    
-    for (unsigned long i = 0; i < f_length; i++) 
-    {
-        byte i_data = current_file.readByte();
-        _DEBUG("%c", i_data);
-    }
-    _DEBUG("\n");
-    
-    current_file.close();
-#endif
-}
-
-// Tests writing, reading back, and then deleting a temporary file
-void test_file_write_and_read()
-{
-    const char* test_filename = "KAREN.txt";
-    char test_data[] = "Karen looks very cute today!";
-    UINT bytes_written = 0;
-
-    // 1. Attempt to create and write the file
-    if (current_file.open(test_filename, 1) < 0) 
-    {
-        _DEBUG("Error creating %s\n", test_filename);
-        return;
-    }
-
-    _DEBUG("%s writing: (%u bytes)\n", test_filename, (unsigned int)sizeof(test_data));
-    FRESULT result = current_file.write((uint8_t*)test_data, sizeof(test_data), &bytes_written);
-    current_file.close();
-
-    if (result != FR_OK) 
-    {
-        _DEBUG("Error writing to %s\n", test_filename);
-        return;
-    }
-    _DEBUG("%s written successfully (%u bytes)\n", test_filename, bytes_written);
-
-    // 2. Attempt to read the file back
-    dump_file_contents(test_filename);
-
-    // 3. Attempt to delete the file
-    if (g_fatfs->remove(test_filename) == FR_OK) 
-    {
-        _DEBUG("%s deleted successfully\n", test_filename);
-    } 
-    else 
-    {
-        _DEBUG("Error deleting %s\n", test_filename);
-    }
-}
-
-
-void sdfat_test()
-{
-    FILINFO fno;
-    // Check if the baseline test file exists
-    if (g_fatfs->exists("0000.mzf",&fno) != FR_OK) 
-    {
-        _DEBUG("0000.mzf not found - SD card may be empty or not working\n");
-        
-        // Enter infinite sleep loop
-        while (1) { sleep_ms(1000); }
-    }
-
-    _DEBUG("0000.mzf found - listing files:\n");
-    g_fatfs->list_root_directory();
-
-    // Run the read test
-    dump_file_contents("0000.mzf");
-
-    // Run the write/read/delete test
-    test_file_write_and_read();
-
-    // Execution complete, halt system
-    while (1) 
-    {
-        sleep_ms(1000);
-    }
-}
 
 // --- Main Init Function ---
 
@@ -1504,45 +1357,16 @@ void mzcmd_init()
     // Initialize the SD card physical layer
     sdinit();
 
-//    sdfat_test();
-}
 
-void f_testload()
-{
-  _DEBUG("-\n");
-  rcv_filename32(m_name);
-  _DEBUG("+\n");
-  sndbyte(0x00);
-  char s[17]="12345678901234\r\0";
-  for (int i = 0; i<=16; i++)
-    sndbyte(s[i]);
-
-  _DEBUG("+\n");
-  //start
-  sndbyte(0x00); // low byte
-  sndbyte(0x12);
-  _DEBUG("+\n");
-  //length
-  sndbyte(0x02); // low byte
-  sndbyte(0x00);
-  _DEBUG("+\n");
-  //exe
-  sndbyte(0x00); // low byte
-  sndbyte(0x12);
-  _DEBUG("+\n");
-
-  sndbyte('A');
-  sndbyte('H');
-  _DEBUG("--\n");
 }
 
 void mzcmd_commandwait()
 {
   // Waiting for command acquisition
   _DEBUG("\ncmd: ");
-  byte cmd = recbyte();
+  byte cmd = recbyte(); // waits for command byte
   _DEBUG("0x%02X\n",cmd);
-  if (eflg == false)
+  if (support_lfn == false)
   {
     switch (cmd)
     {
@@ -1683,4 +1507,36 @@ void mzcmd_commandwait()
     sndbyte(0xF0);
     sdinit();
   }
+}
+
+
+
+int main(void) {
+    stdio_init_all();
+    sleep_ms(2000);
+
+    _DEBUG("Pico-XB80 for Sharp MZ80K v1.0.0\n");
+
+
+    // Initialise the FD Rom
+    const int fd_rom_start = 0xF000;
+    // initialise the shadow memory
+    for (int i = 0; i < EB_BUFFER_LENGTH; i++) {
+        if (i >= fd_rom_start && i <= fd_rom_start + fd_rom_size) {
+            _eb_memory[i] = fd_rom_data[i-fd_rom_start]; // data byte in lower 8 bits, permissions 0x01 (read-only) in upper 8 bits 
+        } else {
+            _eb_memory[i] = 0; // default to 0 with no permissions
+        }
+    }
+    
+    // Initialize the SD card and FatFs
+    start_xb_interface();
+
+    // Start the command loop for Sharp MZ series commands
+    SharpMZ_cmdloop();
+    
+    // Never reaches here, unless there is problem in cmdloop.
+    while (1) {
+        sleep_ms(1000);
+    }
 }

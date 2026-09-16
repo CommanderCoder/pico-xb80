@@ -3,8 +3,6 @@
 #include "xb_if.h"
 #include "pico/rand.h"
 
-#include "FD_rom.h"
-
 #include "hardware/sync.h"
 
 // using 0xFF00 in shadow memory as a communication area - Z80 writes commands and data here, and we can read it and respond accordingly
@@ -15,18 +13,6 @@
 #define PICO_TO_Z80_DATA     0xFFFC
 #define PICO_TO_Z80_FLAG     0xFFFD
 
-
-// PORTO at 0xE000 is the decoder which
-// drives The keyboard rows
-
-// NOTE: the Original FD; MZ-80FD + MZ-80FIO needed to be plugged into the IO Interface Unit MZ-80I/O
-// when it was installed type FD would read the program from ROM at 0xf000-0xf3ff 
-// It would use the 4 port addresses 0xf8-0xfb to interface and grab the first 14 sectors from
-// track 0 into ram address 0x9800 (i.e. machine needs > 36Kb) and then executed at that address. 
-// (128 bytes per sector)
-
-// Possibly do the same by loading boot.mzf into 0x9800 and running it when FD is used (only if boot.mzf exists)
-// and use *FDS to skip booting.
 
 volatile uint16_t _Alignas(EB_BUFFER_LENGTH * 2) _eb_memory[EB_BUFFER_LENGTH] __attribute__((section(".uninitialized_dma_buffer")));
 
@@ -44,6 +30,7 @@ static uint eb2_datawrite_sm_offset;
 #define DATA_COUNT 8
 #define ADDRESS_COUNT 16
 
+// GPIO
 static void eb_gpio_init()
 {
     // Initialize all GPIO pins for the expansion bus
@@ -76,6 +63,7 @@ static void eb_gpio_init()
 
 }
 
+// PIO
 static void eb2_read_program_init()
 {
     eb2_dataread_pio = pio0;
@@ -117,7 +105,6 @@ static void eb2_read_program_init()
     pio_sm_exec(pio, sm, pio_encode_nop() );
 
 }
-
 
 static void eb2_write_program_init()
 {
@@ -180,11 +167,12 @@ static void eb2_write_program_init()
 
 }
 
-    uint address_chan   ;
-    uint read_data_chan ;
-    uint write_data_chan;
-    uint write_read_data_chan;
-    uint save_addr_chan;
+// DMA
+uint address_chan   ;
+uint read_data_chan ;
+uint write_data_chan;
+uint write_read_data_chan;
+uint save_addr_chan;
 
 static void eb_setup_dma_read()
 {
@@ -261,8 +249,6 @@ static void eb_setup_dma_read()
     );
 
 }
-
-
 
 static void eb_setup_dma_write(void)
 {
@@ -545,14 +531,10 @@ static void eb_setup_dma_write(void)
 }
 
 
+// MAILBOXES
 
 void wait_z80_mailbox_empty()
 {
-#if USE_USB_FOR_COMMANDS
-// nothing to clear, just clear the queue
-    message_queue_head = 0;
-    message_queue_tail = 0;
-#else
     _DEBUG("Waiting for empty recv mailbox from Z80...\n");
 
     // hold here while mailbox is not empty
@@ -560,9 +542,10 @@ void wait_z80_mailbox_empty()
     {
         sleep_ms(1);
     }
-#endif
 }
 
+
+// XB_IF INITIALISE
 void eb_init()
 {
     // Initialize GPIO first
@@ -583,50 +566,19 @@ void eb_init()
     
     pio_sm_set_enabled(eb2_dataread_pio, eb2_dataread_sm, true);
     pio_sm_set_enabled(eb2_datawrite_pio, eb2_datawrite_sm, true);
-
-    // z80 empties first, then expects pico to empty
-    wait_z80_mailbox_empty();
-
-    _DEBUG("Set empty snd mailbox to Z80...\n");
-    // initialize data for the communication area
-    eb_set(PICO_TO_Z80_DATA, 0);
-
-    // mark mailbox empty
-    eb_set(PICO_TO_Z80_FLAG, 0);
-
 }
 
 
+// ============================================================================
+// XB_IF STARTUP
+// ============================================================================
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-//prototype
-// void shadowmem_test();
-void SharpMZ_cmdloop();
-extern void measure_freqs(void);
-
-#define REQUIRED_SYS_CLK_KHZ 200000
-
-void start_shadowmem()
+void start_xb_interface()
 {
-// the ROM is mirrored every 256 bytes, so we can just initialize the first 256 bytes of the buffer with the ROM data, and the rest can be initialized to 0
     eb_set_perm(0x0000, EB_PERM_NONE, 0x10000);
 
     // the ROM
-    eb_set_perm(0xF000, EB_PERM_READ_WRITE, 0x1000); //0x01 0b0001
+    eb_set_perm(0xF000, EB_PERM_READ_ONLY, 0x1000); //0x01 0b0001
 
     // the SD card interface - for now just a simple command/status register, but could be expanded to include a data buffer and more control registers if needed
     eb_set_perm(Z80_TO_PICO_DATA, EB_PERM_READ_WRITE, 2); // SD card interface
@@ -637,167 +589,21 @@ void start_shadowmem()
     
     // PIOs claimed automatically
     eb_init();
+
+     // z80 empties first, then expects pico to empty
+    wait_z80_mailbox_empty();
+
+    _DEBUG("Set empty snd mailbox to Z80...\n");
+    // initialize data for the communication area
+    eb_set(PICO_TO_Z80_DATA, 0);
+
+    // mark mailbox empty
+    eb_set(PICO_TO_Z80_FLAG, 0);
 }
 
 
 
-int main(void) {
 
-    //beep(250, 500, -1);
-
-    // Set custom clock speeds
-    if (SYS_CLK_KHZ != REQUIRED_SYS_CLK_KHZ) {
-        // set_sys_clock_khz(REQUIRED_SYS_CLK_KHZ, true);
-    }
-
-    // turn off USB - does that fix USB power problem?
-    stdio_init_all();
-    sleep_ms(2000);
-
-    _DEBUG("MZ80K Expansion Bus v1.0.0\n");
-
-    // measure_freqs();
-
-    const int fd_rom_start = 0xF000;
-    // initialise the shadow memory
-    for (int i = 0; i < EB_BUFFER_LENGTH; i++) {
-        if (i >= fd_rom_start && i <= fd_rom_start + fd_rom_size) {
-            _eb_memory[i] = fd_rom_data[i-fd_rom_start]; // data byte in lower 8 bits, permissions 0x01 (read-only) in upper 8 bits 
-        } else {
-            _eb_memory[i] = 0; // default to 0 with no permissions
-        }
-    }
-
-    // gpio_init(PICO_DEFAULT_LED_PIN);
-    // gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-
-
-    // gpio_put(PICO_DEFAULT_LED_PIN, 0);
-    // sleep_ms(1000);
-    // gpio_put(PICO_DEFAULT_LED_PIN, 1);
-
-    start_shadowmem();
-
-    // -- shadowmem_test();
-    SharpMZ_cmdloop();
-    
-    while (1) {
-        // __wfi(); // if interrupt set, then wait for it, otherwise just sleep
-        sleep_ms(1000);
-    }
-}
-
-
-// ============================================================================
-// SHADOW MEMORY LOGGING AND VERIFICATION
-// ============================================================================
-
-/// @brief Print the shadow memory contents for a range of addresses
-/// @param start Starting address to dump
-/// @param count Number of addresses to dump
-void print_shadow_memory_range(uint16_t start, uint16_t count) {
-    _DEBUG("\n=== SHADOW MEMORY DUMP (0x%04X - 0x%04X) ===\n", start, start + count - 1);
-    
-    for (uint16_t addr = start; addr < start + count; addr++) {
-        uint8_t data = eb_get(addr);
-        uint8_t perm_byte = (uint8_t)((_eb_memory[addr] >> 8) & 0xFF);
-        uint8_t char_repr = (data >= 32 && data <= 126) ? data : '.'; // printable ASCII or dot
-        uint8_t orig_byte = (uint8_t)((fd_rom_data[addr&0xff]) & 0xFF);
-
-        _DEBUG("  [0x%04X] DATA:0x%02X [%c] (orig:0x%02X) PERM:0x%02X\n", addr, data, char_repr,orig_byte, perm_byte);
-    }
-    
-    _DEBUG("=== END DUMP ===\n\n");
-}
-
-/// @brief Calculate CRC16 checksum of shadow memory range
-/// @param start Starting address
-/// @param count Number of addresses
-/// @return 16-bit CRC checksum
-uint16_t calculate_memory_checksum(uint16_t start, uint16_t count) {
-    uint16_t crc = 0xFFFF;
-    
-    for (uint16_t addr = start; addr < start + count; addr++) {
-        uint8_t data = eb_get(addr);
-        
-        for (int i = 0; i < 8; i++) {
-            uint16_t bit = ((data >> i) & 1) ^ (crc & 1);
-            crc >>= 1;
-            if (bit) crc ^= 0xA001;  // CRC-16-IBM polynomial
-        }
-    }
-    
-    return crc;
-}
-
-/// @brief Print test phase summary
-/// @param phase_name Name of the test phase
-/// @param addr_start Starting address tested
-/// @param addr_count Number of addresses tested
-/// @param operations_count Total operations performed
-void print_phase_summary(const char* phase_name, uint16_t addr_start, uint16_t addr_count, uint32_t operations_count) {
-    uint16_t checksum = calculate_memory_checksum(addr_start, addr_count);
-    
-    _DEBUG("\n[PHASE] %s\n", phase_name);
-    _DEBUG("  Addresses tested: 0x%04X - 0x%04X (%d addresses)\n", 
-           addr_start, addr_start + addr_count - 1, addr_count);
-    _DEBUG("  Operations: %lu\n", operations_count);
-    _DEBUG("  Memory checksum (CRC16): 0x%04X\n", checksum);
-    _DEBUG("[/PHASE]\n\n");
-}
-
-// run the emulation - can be run from both cores simultaneously
-/// @brief Process incoming write data from Z80 bus via write SM FIFO
-/// @param address The Z80 memory address where data is being written
-/// @param data_word Raw data word from write SM RX FIFO
-static void process_eb_write(uint16_t address, uint32_t data_word) {
-    uint8_t data_byte = (uint8_t)(data_word&0xff);
-    
-    // Store the data in _eb_memory at the specified address
-    eb_set(address, data_byte);
-    _DEBUG("Write request for address 0x%04X, wrote 0x%02X\n", address, data_byte);
-
-    // Verify the write
-    uint8_t readback = eb_get(address);
-    if (readback != data_byte) {
-        _DEBUG("WARNING: Write verification failed at 0x%04X: wrote 0x%02X, read back 0x%02X\n", 
-               address, data_byte, readback);
-    }
-}
-
-static uint8_t process_eb_read(uint16_t address) {
-    // Read the data from _eb_memory at the specified address
-    uint8_t data_byte = eb_get(address);
-    
-    // For debugging, print the read request and the data being returned
-    _DEBUG("Read request for address 0x%04X, returning 0x%02X\n", address, data_byte);
-    
-    return data_byte;
-}
-
-void shadowmem_test() {
-    uint32_t operation_counter = 0;
-    uint32_t cycle_counter = 0;
-    
-    _DEBUG("\n╔════════════════════════════════════════════════════╗\n");
-    _DEBUG("║    Shadow Memory Test Harness - Pico Monitor       ║\n");
-    _DEBUG("╚════════════════════════════════════════════════════╝\n\n");
-    
-    _DEBUG("Listening for memory writes/reads via PIO state machines.\n");
-    _DEBUG("NOTE: _eb_memory is NOW being updated on data receipt.\n\n");
-    
-    // nothing to do, just wait for events from the PIO state machines and process them in the callbacks
-
-    // loop and every 5 seconds display the content of 0x0000-0x0014 and 0xF000-0xF014, which should contain the test data from the Arduino test sketch
-    // display the data, and the permission flags
-    while (1) {
-        sleep_ms(5000);
-        print_shadow_memory_range(0xFF00, 0x14); // dump first 32 bytes (includes test data and some non-ROM area)
-        _DEBUG("Cycle %d complete.\n", cycle_counter);
-        cycle_counter++;
-    }
-
-}
 
 // TEMPORARY DIAGNOSTIC: fires once if a mailbox wait loop below stalls for an
 // unreasonably long time, dumping the flag byte we're waiting on plus the
@@ -871,282 +677,14 @@ uint8_t recbyte_z80()
     return idata;
 }
  
-
-
-
-
-void sndbyte_usb(uint8_t response)
-{
-    printf("[USB SEND] 0x%02X [%c]\n", response, (response >= 32 && response <= 126) ? response : '.'   );
-}
-
-uint8_t message_queue[256];
-uint8_t message_queue_head = 0;
-uint8_t message_queue_tail = 0;
-
-void push(uint8_t message) {
-    message_queue[message_queue_head] = message;
-    message_queue_head = (message_queue_head + 1) % 256;
-    if (message_queue_head == message_queue_tail) {
-        // queue is full, move tail forward to overwrite oldest message
-        message_queue_tail = (message_queue_tail + 1) % 256;
-    }
-}
-
-void push2(uint16_t message) {
-    // little endian (low byte first)
-    push(message & 0xFF);        // low byte
-    push((message >> 8) & 0xFF); // high byte
-}
-
-void pushblock(const char* str, int len) {
-    for (int i = 0; i < len; i++) {
-        push(str[i]);
-    }
-}
-
-void push16(const char* str)
-{
-    pushblock(str,16);
-}
-
-uint8_t pop() {
-    if (message_queue_head == message_queue_tail) {
-        // queue is empty
-        return 0; // or some sentinel value
-    }
-    uint8_t message = message_queue[message_queue_tail];
-    message_queue_tail = (message_queue_tail + 1) % 256;
-    return message;
-}
-
-bool is_queue_empty() {
-    return message_queue_head == message_queue_tail;
-}
-
-void push_filename32(const char* filename) {
-    char buffer[32];
-    memset(buffer, 0, sizeof(buffer));
-    snprintf(buffer, sizeof(buffer), "%s", filename); // ensure null-termination
-    for (int i = 0; i < 32; i++) {
-        push(buffer[i]);
-    }
-}
-
-uint8_t recbyte_usb()
-{
-    uint8_t message;
-    if (!is_queue_empty()) {
-
-        message = pop(); // get the message we just received
-        printf("[USB RECV] 0x%02X [%c]\n", message, (message >= 32 && message <= 126) ? message : '.'   );
-        return message;
- 
-    }
-
-    printf("Waiting for input on USB serial...\n");
-
-    // check what is on the USB serial input buffer, if there is a byte, return it, otherwise keep checking
-    // wait for character to be available on USB serial input
-    message = getchar(); // read the character from USB serial input
-    _DEBUG("got character 0x%02X [%c] from USB\n", message, (message >= 32 && message <= 126) ? message : '.'   );
-
-    char filename[32];
-    memset(filename, 0, sizeof(filename)); // clear the filename buffer
-    switch(message) {
-        case 's': // save
-            push(SAVE);
-            push_filename32("cake.mzt\r"); // 32 bytes
-            push(0x00); // plus terminator
-            push16("THEPROGRAM\0\0\0\0\0\0"); // 16 bytes
-            push(0x00); // plus terminator
-            push2(0x0002); // load address (incl)
-            push2(0x0015); // end address (incl)
-            push2(0x0002); // execution address
-            for (int i = 0; i < 0x14; i++) {
-                push(i); // dummy data bytes for the file content
-            }
-
-            break;
-        case 'g': // load/get
-            push(LOAD);
-            push_filename32("cake.mzt\r");
-            push(0x00); // terminator
-
-            break;
-        case 'l': // filelist
-            push(FILELIST);
-            push_filename32("\0");
-            push(0x00); // terminator
-
-            break;
-        case 'd': // filedump
-            push(FILEDUMP);
-            push_filename32("CAKE.MZT\r");
-            push(0x00); // terminator
-            
-            push(0xFF); // BREAK
-            break;
-        case 'b': // boot
-            push(BOOTLOAD);
-            push_filename32("0000.MZT\r");
-            push(0x00);  // terminator
-            break;
-        case 'c': // copy
-            push(FILECOPY);
-            push_filename32("0000.MZT\r");
-            push(0x00); // terminator
-            push_filename32("0001.MZT\r");
-            push(0x00); // terminator
-            break;
-        case 'r': // rename
-            push(FILEREN);
-            push_filename32("0001.MZT\r");
-            push(0x00); // terminator
-            push_filename32("0002.MZT\r");
-            push(0x00); // terminator
-            break;
-        case 'x': // remove/delete
-            push(FILEDEL);
-            push_filename32("0001.MZT\r");
-            push(0x00); // terminator
-            push(0x00); // confirm
-            push(0x84);
-            push_filename32("0002.MZT\r");
-            push(0x00); // terminator
-            push(0x00); // confirm
-            push(0x84);
-            push_filename32("cake.mzt\r");
-            push(0x00); // terminator
-            push(0x00); // confirm
-            break;
-
-        case 'n':
-        // write using HEADER and DATA
-            push(MONITOR_WHEAD); // HEADER 0436
-            {
-                char infoblock[128];
-                memset(infoblock, 0, 128);
-                snprintf(infoblock,17, "\02FILENAME\r");
-                pushblock(infoblock,128);
-            }
-            
-            push(MONITOR_WDATA); // DATA 0475
-            {
-                int datalen = 20;
-                char datablock[datalen];
-                memset(datablock, 0, datalen);
-                snprintf(datablock, datalen, "some funny data");
-                push2(datalen);
-                pushblock(datablock,datalen);
-            }
-
-        break;
-        case 'm':
-        // read using HEAD and DATA
-            push(MONITOR_LHEAD); // HEADER 0436
-            {
-                push_filename32("FILENAME\r");
-                push(0x00); // and terminator
-                // header will be sent
-            }
-            
-            push(MONITOR_LDATA); // DATA 0475
-            {
-                int datalen = 20;
-                push2(datalen);
-            }
-
-        break;
-        case 'p': // file menu process
-            push(FILECOUNT); // file count
-            {
-                // the count will appear on USB
-            }
-            
-
-            push(FILEINFO); // file get name
-            push(255); // file number
-            {
-                // the file name will appear on USB
-            }
-
-        break;
-
-        case 'P': // file menu OPEN
-            push(FILECOUNT); // file count
-            {
-                // the count will appear on USB
-            }
-
-            push(FILEINFO); // file get name
-            push(5); // file number
-            {
-                // the file name will appear on USB
-            }
-
-            push(FILELOAD); // file open
-            push(20); // file number
-            {
-                // file data will appear on USB
-            }
-
-        break;
-
-        default:
-            push(message);
-            break;
-    }
-
-    message = pop(); // get the message we just received
-
-    printf("[USB RECV] 0x%02X [%c]\n", message, (message >= 32 && message <= 126) ? message : '.'   );
-    stdio_flush(); // ensure the output is sent before we return the message
-    return message;
-}
-
-// USB for commands - allow the user (me) to type in commands via USB to the PICO and it will send response back on screen (what it
-// would have sent to the MZ80)
-#define USE_USB_FOR_COMMANDS 0
-
 void sndbyte(uint8_t response)
 {
-#if USE_USB_FOR_COMMANDS
-    sndbyte_usb(response);
-#else
     sndbyte_z80(response); 
-#endif
 }
 
 uint8_t recbyte()
 {
-#if USE_USB_FOR_COMMANDS
-    return recbyte_usb();
-#else
     return recbyte_z80();
-#endif
 }
 
-void SharpMZ_cmdloop()
-{
-    mzcmd_init();
- 
 
-    _DEBUG("\nEntering Sharp MZ command loop. Waiting for commands from Z80...\n");
-
-    uint8_t last_command = 0;
-    while(1)
-    {
-        // wait for Z80 to publish a byte
-        uint8_t a = 0;//eb_get(Z80_TO_PICO_FLAG);
-        uint8_t b = 1;//eb_get(Z80_TO_PICO_DATA);
-        // sleep_ms(1);
-        // __dmb();
-        // _DEBUG("Z80_TO_PICO_FLAG = 0x%02X\n", a);
-        // _DEBUG("Z80_TO_PICO_DATA = 0x%02X\n", b);
-//         // _DEBUG("\n");
-
-        mzcmd_commandwait();
-    }
-    
-}

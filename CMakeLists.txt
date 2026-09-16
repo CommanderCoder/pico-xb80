@@ -55,6 +55,7 @@ add_executable(pico-xb80
     fatfs/ff.c
     fatfs/ffunicode.c
     sdcard/sd_card.cpp
+    sharp-mz80k/sharp_mz.cpp
 )
 
 pico_set_program_name(pico-xb80 "pico-xb80")
@@ -72,7 +73,7 @@ set(ROM_ASM_SOURCE
     "${CMAKE_CURRENT_LIST_DIR}/sharp-mz80k/FD_rom.s"
     )
 set(ROM_BIN_OUTPUT ${CMAKE_BINARY_DIR}/FD_rom.bin)
-set(ROM_HEADER_OUTPUT ${CMAKE_CURRENT_LIST_DIR}/FD_rom.h)
+set(ROM_HEADER_OUTPUT ${CMAKE_CURRENT_LIST_DIR}/sharp-mz80k/FD_rom.h)
 
 add_custom_command(
     OUTPUT "${ROM_BIN_OUTPUT}" "${ROM_HEADER_OUTPUT}"

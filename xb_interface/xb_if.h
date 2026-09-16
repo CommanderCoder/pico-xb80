@@ -202,8 +202,8 @@ extern void mzcmd_init();
 extern void mzcmd_commandwait();
 extern uint8_t recbyte();
 extern void sndbyte(uint8_t response);
-
-
+extern void start_xb_interface();
+extern void wait_z80_mailbox_empty();
 
 #define SAVE 0x80 // using filename
 #define LOAD 0x81 // using filename
