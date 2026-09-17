@@ -11,7 +11,7 @@
 #include "cursed_chambers.h"
 
 // Persistent FatFs and SD objects
-static FIL current_file;
+
 static int sd_initialized = 0;
 
 namespace {
