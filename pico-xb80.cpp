@@ -14,21 +14,10 @@
 
 
 
-
-
-// couldn't find sd card
-bool sd_missing = false;
-
-
-
-// Forward declarations
-bool InitSDFatFs();
-
-
 // TEMPORARY DIAGNOSTIC: list every .MZF file on the SD card directly on the
 // Pico side (no Z80/PIO involvement at all), to check the SD/FatFs listing
 // logic in isolation from the Z80 transport. Remove once confirmed working.
-static void list_files_local(const char* extension)
+void list_files_local(const char* extension)
 {
   DIR dir;
   FILINFO fno;
@@ -63,31 +52,34 @@ static void list_files_local(const char* extension)
   _DEBUG("---  %d file(s) found with extension .%s ---\n", count, extension);
 }
 
-void sdinit(void){
-  // SD system initialization
-  if( !InitSDFatFs() )
-  {
-    _DEBUG("Failed : SD.begin");
-    sd_missing = true;
-  }
-  else {
-    _DEBUG("OK : SD.begin");
-    sd_missing = false;
-  }
 
-  
-  if (!sd_missing) {
-    list_files_local("mzf"); // TEMPORARY DIAGNOSTIC
-  }
-
-}
-
-
+// build a local cache of the files in the root directory which end in .MZF or .mzf
+struct FileEntry {
+  FILINFO fno; // FATFS file info structure
+  char displayname[32]; // 32 characters for the filename
+};
 
 // 255 not 256 because FileCount is a count, and not an index, so the maximum index is 254, which is 255 entries in total.
-struct FileEntry FileList[255]; // 255 files, each with a max length of 32 characters
-uint8_t FileCount = 0; // number of files found
-#define getFileCount() (FileCount) // getter for FileCount
+static struct FileEntry FileList[255]; // 255 files, each with a max length of 32 characters
+static uint8_t FileCount = 0; // number of files found
+
+uint8_t getFileCount(void){
+  return FileCount;
+}
+
+char* getDisplayName(uint8_t index){
+  if (index >= FileCount) {
+    return nullptr; // or handle error as appropriate
+  }
+  return FileList[index].displayname;
+}
+
+char* getFileName(uint8_t index){
+  if (index >= FileCount) {
+    return nullptr; // or handle error as appropriate
+  }
+  return FileList[index].fno.fname;
+}
 
 void establishFileList(void)
 {
@@ -148,28 +140,6 @@ void establishFileList(void)
   {
     _DEBUG("File %d: %s\n", i, FileList[i].displayname);
   }
-}
-
-//   // Compare f_name and c_name until c_name contains 0x00
-//   // FILENAME COMPARE
-bool f_match(char *f_name, char *c_name)
-{
-  bool flg1 = true;
-  unsigned int lp1 = 0;
-  
-  // If c_name is empty (just null terminator), match all files
-  if (c_name[0] == 0x00)
-  {
-    return true;
-  }
-  
-  // Compare filenames [len 32], f_name & c_name case-insensitively and set flg1 to false if they don't match
-  if (strncasecmp(f_name, c_name, 32) != 0)
-  {
-    flg1 = false;
-  }
-
-  return flg1;
 }
 
 

@@ -1,20 +1,9 @@
 #pragma once
 
-
-#include "ff.h"
-
-#define getFileCount() (FileCount) // getter for FileCount
-extern uint8_t FileCount; // number of files found
+uint8_t getFileCount(void);
+char* getDisplayName(uint8_t index);
+char* getFileName(uint8_t index);
 
 void establishFileList(void);
-void sdinit(void);
-bool f_match(char *f_name, char *c_name);
 
-
-// build a local cache of the files in the root directory which end in .MZF or .mzf
-struct FileEntry {
-  FILINFO fno; // FATFS file info structure
-  char displayname[32]; // 32 characters for the filename
-};
-
-extern struct FileEntry FileList[255];
+void list_files_local(const char* extension); // TEMPORARY DIAGNOSTIC: list every .MZF file on the SD card directly on the Pico side (no Z80/PIO involvement at all), to check the SD/FatFs listing logic in isolation from the Z80 transport. Remove once confirmed working.

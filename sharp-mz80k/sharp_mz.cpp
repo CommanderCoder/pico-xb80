@@ -21,8 +21,6 @@ char m_name_copy[130]; // includes path
 unsigned long m_lop=128;
 char m_name[40];
 
-
-
 // Lowercase -> Uppercase
 char upper(char c){
   if('a' <= c && c <= 'z'){
@@ -151,6 +149,31 @@ public:
 
 static SDfile current_file;
 static SDfile current_file_for_copy;
+
+
+// couldn't find sd card
+bool sd_missing = false;
+
+
+
+void sdinit(void){
+  // SD system initialization
+  if( !InitSDFatFs() )
+  {
+    _DEBUG("Failed : SD.begin");
+    sd_missing = true;
+  }
+  else {
+    _DEBUG("OK : SD.begin");
+    sd_missing = false;
+  }
+
+  
+  if (!sd_missing) {
+    list_files_local("mzf"); // TEMPORARY DIAGNOSTIC
+  }
+
+}
 
 
 
@@ -514,6 +537,7 @@ void astart(void)
 
 void sendFileName(const uint8_t index)
 {
+  uint8_t FileCount = getFileCount();
   if (index >= FileCount || index >= 255) {
     sndbyte(0xF1); // error: index out of bounds
     return;
@@ -522,7 +546,7 @@ void sendFileName(const uint8_t index)
 
   // send up to 32 characters of the display name, including null terminator if present
   // terminate at 0
-  const char* name = FileList[index].displayname;
+  const char* name = getDisplayName(index);
   for (int i = 0; i < 32; i++) {
     char c = name[i];
     sndbyte(c);
@@ -535,13 +559,15 @@ void sendFileName(const uint8_t index)
 // Read from SD card
 void sendFileData(const uint8_t index)
 {
+    uint8_t FileCount = getFileCount();
+
   if (index >= FileCount || index >= 255) {
     sndbyte(0xF1); // error: index out of bounds
     return;
   }
 
   char f_name[300]; // buffer for the filename  
-  strncpy(f_name, FileList[index].fno.fname, sizeof(f_name) - 1);
+  strncpy(f_name, getFileName(index), sizeof(f_name) - 1);
   f_name[sizeof(f_name) - 1] = '\0'; // ensure null termination
 
   _DEBUG("sendFileData: %s\n", f_name);
@@ -556,6 +582,8 @@ void dirlist(void)
   // Get comparison string (up to 32+1 characters)
   char c_name[40];
   rcv_filename32(c_name);
+
+  _DEBUG("dirlist: comparison string: %s\n", c_name);
 
   // Open root directory
   DIR dir;
@@ -611,7 +639,7 @@ void dirlist(void)
     }
 
     // Filter by match if needed
-    if (f_match(fno.fname, c_name))
+    if (c_name[0] == 0x00 || strncasecmp(fno.fname, c_name, strlen(c_name)) == 0)
     {
       _DEBUG("direntry %s %u\n", fno.fname, fno.fsize);
 
@@ -1219,8 +1247,7 @@ void mzcmd_commandwait()
   _DEBUG("\ncmd: ");
   byte cmd = recbyte(); // waits for command byte
   _DEBUG("0x%02X\n",cmd);
-//   if (sd_missing == false)
-  if (true)
+  if (sd_missing == false)
   {
     switch (cmd)
     {

@@ -489,7 +489,8 @@ STAS:	LD		A,82H
 ; Inputs: DE points to directory spec or default used
 ; Outputs: calls DIRLIST and returns to monitor
 ; Clobbers: A, HL, BC
-STLT:	INC		DE ; skip space
+STLT:	INC		DE ; skip 'L'
+		INC		DE ; skip space
 		LD		HL,DEFDIR
 		LD		BC,DEND-DEFDIR
 		CALL	DIRLIST
