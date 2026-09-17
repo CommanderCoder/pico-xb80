@@ -17,11 +17,11 @@
 // TEMPORARY DIAGNOSTIC: list every .MZF file on the SD card directly on the
 // Pico side (no Z80/PIO involvement at all), to check the SD/FatFs listing
 // logic in isolation from the Z80 transport. Remove once confirmed working.
-void list_files_local(const char* extension)
+void list_files_local(const char* extension, const char* rootdir)
 {
   DIR dir;
   FILINFO fno;
-  FRESULT result = f_opendir(&dir, ROOT_DIR);
+  FRESULT result = f_opendir(&dir, rootdir);
   if (result != FR_OK) {
     _DEBUG("list_files_local: f_opendir failed");
     return;
@@ -81,12 +81,12 @@ char* getFileName(uint8_t index){
   return FileList[index].fno.fname;
 }
 
-void establishFileList(void)
+void establishFileList(const char* rootdir)
 {
   // Open root directory
   DIR dir;
   FILINFO fno;
-  FRESULT result = f_opendir(&dir, ROOT_DIR);
+  FRESULT result = f_opendir(&dir, rootdir);
 
   FileCount = 0; // reset file count
   
@@ -150,13 +150,11 @@ void init_led()
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
 }
 
-void toggle_led(bool force_off = false)
+void set_led(bool on)
 {
-    // Toggle the LED state
-    static bool led_state = false;
-    led_state = force_off?false:!led_state;
-    gpio_put(PICO_DEFAULT_LED_PIN, led_state);
+    gpio_put(PICO_DEFAULT_LED_PIN, on ? 1 : 0);
 }
+
 
 int main(void) {
     // prep USB logging
@@ -165,14 +163,7 @@ int main(void) {
 
     _DEBUG("Pico-XB80 for Sharp MZ80K v1.0.0\n");
 
-    // prep GPIO for LED
-
-    init_led();
-
-    toggle_led();
-    sleep_ms(1000);
-    toggle_led(true); // force off
-
+   
 
     // Initialize the SD card and FatFs
     start_xb_interface();
@@ -180,6 +171,13 @@ int main(void) {
     // Initialise the Sharp MZ series interface
     SharpMZ_initialise();
     
+  // prep GPIO for LED - must come after setup of interface since that will change pin 25 state to input for the SD card interface
+
+    init_led();
+
+    set_led(true);
+    sleep_ms(1000);
+    set_led(false); // force off
 
     // Start the command loop for Sharp MZ series commands
     SharpMZ_cmdloop();

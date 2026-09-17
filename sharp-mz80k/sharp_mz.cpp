@@ -106,19 +106,24 @@ public:
 
   // open file. Returns 0 on success, -1 on error. Mirrors previous SdFat_open behaviour.
   int open(const char* filename, int mode) {
+    set_led(true);
     BYTE fatfs_mode = 0;
     if (mode == FILE_READ) fatfs_mode = FA_READ;
     else fatfs_mode = FA_CREATE_ALWAYS | FA_WRITE;
 
     FRESULT result = g_fatfs->open(&fil, filename, fatfs_mode);
     if (result == FR_OK) {
+    _DEBUG("SDfile: open for %s with mode %d, FRESULT: %d\n", filename, mode, static_cast<int>(result));
       return 0;
     }
+      set_led(false);
     return -1;
   }
 
 
   void close() {
+    set_led(false);
+    _DEBUG("SDfile: closing file %d\n", static_cast<int>(fil.obj.id));
     f_close(&fil);
   }
 
@@ -170,7 +175,7 @@ void sdinit(void){
 
   
   if (!sd_missing) {
-    list_files_local("mzf"); // TEMPORARY DIAGNOSTIC
+    list_files_local("mzf", ROOT_DIR); // TEMPORARY DIAGNOSTIC
   }
 
 }
@@ -1351,7 +1356,7 @@ void mzcmd_commandwait()
       // Sending status code (OK)
       sndbyte(0x00);
 
-     establishFileList();
+     establishFileList(ROOT_DIR);
      sndbyte(getFileCount()); // single byte - count is clamped to 255
 
       break;
