@@ -262,6 +262,170 @@ void rcv_filename32(char *f_name)
   rcv_block(f_name, 33); // 32 plus terminator
 }
 
+// Receive a filename from the Z80 as a plain NUL-terminated string.
+// The Z80 sends 33 bytes: the name, a CR, then NUL padding.
+static void recv_name(char *out, size_t out_len)
+{
+  char raw[40];
+  memset(raw, 0, sizeof(raw));
+  rcv_filename32(raw);
+  raw[33] = '\0';
+
+  size_t n = 0;
+  for (size_t i = 0; i < 33 && n + 1 < out_len; i++)
+  {
+    if (raw[i] == 0x0D || raw[i] == '\0') break;
+    out[n++] = raw[i];
+  }
+  while (n > 0 && out[n - 1] == ' ') n--; // drop the header's space padding
+  out[n] = '\0';
+}
+
+// Build "<ROOT_DIR>/<name>.mzf", tolerating a name that already carries the
+// extension.
+static void make_mzf_path(char *dest, size_t dest_len, const char *name)
+{
+  size_t len = strlen(name);
+  if (len > 4 && strncasecmp(name + len - 4, ".mzf", 4) == 0)
+  {
+    snprintf(dest, dest_len, "%s/%s", ROOT_DIR, name);
+  }
+  else
+  {
+    snprintf(dest, dest_len, "%s/%s.mzf", ROOT_DIR, name);
+  }
+}
+
+// Strip the ".mzf" extension from an SD filename.
+static void strip_mzf(char *dest, size_t dest_len, const char *sdname)
+{
+  size_t len = strlen(sdname);
+  if (len > 4 && strncasecmp(sdname + len - 4, ".mzf", 4) == 0) len -= 4;
+  if (len > dest_len - 1) len = dest_len - 1;
+  memcpy(dest, sdname, len);
+  dest[len] = '\0';
+}
+
+// Find the file a name from the Z80 refers to and return its full SD path.
+//
+// Per OPERATING.md names are IBF names - the name stored inside the file
+// header - so that is matched first. The SD card filename is only tried as a
+// fallback, which is what lets "*FD" boot 0000.mzf by its SD name even though
+// that file's IBF name is whatever program it holds.
+//
+// With allow_prefix set, a leading-substring match is accepted too, matching
+// how BASIC lets you abbreviate a name after LOAD.
+static bool resolve_name(const char *name, char *path, size_t path_len,
+                         bool allow_prefix)
+{
+  if (name[0] == '\0') return false;
+
+  establishFileList(ROOT_DIR);
+  const uint8_t count = getFileCount();
+  const size_t want = strlen(name);
+
+  // 1. exact listed name, which carries the <n tag when a name is shared and
+  //    so is the only way to single out one file of a duplicate group
+  for (uint8_t i = 0; i < count; i++)
+  {
+    if (strcasecmp(getDisplayName(i), name) == 0)
+    {
+      addrootdir(path, getFileName(i), path_len);
+      return true;
+    }
+  }
+
+  // 2. exact IBF name as the header holds it, so an untagged name typed from
+  //    BASIC still finds the first file carrying it
+  for (uint8_t i = 0; i < count; i++)
+  {
+    if (strcasecmp(getRawName(i), name) == 0)
+    {
+      addrootdir(path, getFileName(i), path_len);
+      return true;
+    }
+  }
+
+  // 3. exact SD filename
+  for (uint8_t i = 0; i < count; i++)
+  {
+    char base[300];
+    strip_mzf(base, sizeof(base), getFileName(i));
+    if (strcasecmp(base, name) == 0)
+    {
+      addrootdir(path, getFileName(i), path_len);
+      return true;
+    }
+  }
+
+  if (!allow_prefix) return false;
+
+  // 4. IBF name beginning with the requested text
+  for (uint8_t i = 0; i < count; i++)
+  {
+    if (strncasecmp(getRawName(i), name, want) == 0)
+    {
+      addrootdir(path, getFileName(i), path_len);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// True if any file already carries this IBF name, which is what rename and
+// copy check their destination against.
+//
+// except_path lets rename ignore the file being renamed, so giving a file an
+// IBF name that already matches its own SD filename is not reported as a
+// collision with itself.
+static bool ibf_name_taken(const char *name, const char *except_path)
+{
+  establishFileList(ROOT_DIR);
+  const uint8_t count = getFileCount();
+
+  for (uint8_t i = 0; i < count; i++)
+  {
+    char path[300];
+    addrootdir(path, getFileName(i), sizeof(path));
+    if (except_path != nullptr && strcasecmp(path, except_path) == 0) continue;
+
+    // The header name, not the listed one - a <n tag is only a label this
+    // scan added, so it must not make a name look free or taken.
+    if (strcasecmp(getRawName(i), name) == 0) return true;
+
+    char base[300];
+    strip_mzf(base, sizeof(base), getFileName(i));
+    if (strcasecmp(base, name) == 0) return true;
+  }
+  return false;
+}
+
+// Overwrite the 17-byte IBF name field in an existing file's header so a
+// renamed or copied file lists under its new name.
+static bool write_ibf_name(const char *path, const char *name)
+{
+  FIL fp;
+  if (f_open(&fp, path, FA_READ | FA_WRITE) != FR_OK) return false;
+  if (f_lseek(&fp, IBF_NAME_OFFSET) != FR_OK)
+  {
+    f_close(&fp);
+    return false;
+  }
+
+  char field[IBF_NAME_MAX];
+  memset(field, 0, sizeof(field));
+  size_t n = strlen(name);
+  if (n > sizeof(field) - 1) n = sizeof(field) - 1;
+  memcpy(field, name, n);
+  field[n] = 0x0D; // CR terminates the name field
+
+  UINT bw = 0;
+  FRESULT res = f_write(&fp, field, sizeof(field), &bw);
+  f_close(&fp);
+  return res == FR_OK && bw == sizeof(field);
+}
+
 // Save to SD card
 void f_save()
 {
@@ -320,15 +484,15 @@ void f_save()
     
     uint8_t mode_byte = 0x01;
     current_file.write(&mode_byte, 1, &bw);
-    
-    // Program name (17 bytes)
-    current_file.write((uint8_t*)p_name, 17, &bw);
-    
-    // Null terminator
-    uint8_t null_byte = 0x00;
-    current_file.write(&null_byte, 1, &bw);
 
-    // File size (2 bytes)
+    // Program name (17 bytes, header offsets 01H-11H)
+    current_file.write((uint8_t*)p_name, 17, &bw);
+
+    uint8_t null_byte = 0x00;
+
+    // File size (2 bytes) - this belongs at offset 12H. An extra null used
+    // to be written here first, pushing the size, load and exec addresses
+    // one byte along so f_send() read them back from the wrong offsets.
     current_file.write((uint8_t*)&f_length1, 1, &bw);
     current_file.write((uint8_t*)&f_length2, 1, &bw);
     
@@ -340,11 +504,11 @@ void f_save()
     current_file.write((uint8_t*)&g_adrs1, 1, &bw);
     current_file.write((uint8_t*)&g_adrs2, 1, &bw);
     
-    // Fill up to 7F with 00 (103 more bytes to reach 128 total header)
+    // Fill up to 7FH with 00 (1 + 17 + 6 bytes written so far)
     {
       uint8_t zero[128];
       memset(zero, null_byte, 128);
-      current_file.write(zero, 103, &bw);
+      current_file.write(zero, 128 - 24, &bw);
     }
     
     // Actual data transfer
@@ -371,10 +535,8 @@ void f_save()
   }
 }
 
-void f_send(const char* f_name)
+void f_send(const char* f_name_copy)
 {
-  char f_name_copy[300]; // buffer for the filename
-  addrootdir(f_name_copy,f_name, sizeof(f_name_copy)); // prepend root directory to filename
   // Try to open file from SD card
   if (current_file.open(f_name_copy, FILE_READ) >= 0)  // FILE_READ mode
   {
@@ -448,12 +610,19 @@ void f_send(const char* f_name)
 // Read from SD card
 void f_load(void)
 {
-  char f_name[40];
-  rcv_filename32(f_name);
-  addmzf(f_name);
-  _DEBUG("%s\n",f_name);
+  char i_name[40];
+  recv_name(i_name, sizeof(i_name));
+  _DEBUG("%s\n", i_name);
 
-  f_send(f_name);
+  char f_name[300];
+  if (resolve_name(i_name, f_name, sizeof(f_name), false))
+  {
+    f_send(f_name);
+  }
+  else
+  {
+    sndbyte(0xF1);  // File not found error
+  }
 }
 
 // ASTART Copies the specified file as filename "0000.mzf"
@@ -462,15 +631,12 @@ void astart(void)
   char w_name[50];
   addrootdir(w_name, "0000.mzf", sizeof(w_name)); // prepend root directory to filename
 
-  // Get filename
-  char f_name[40];
-  rcv_filename32(f_name);
-  addrootdir(m_name_copy, f_name, sizeof(m_name_copy)); // prepend root directory to filename
-  addmzf(m_name_copy);
-  
+  // Get the IBF filename and find the file it names
+  char i_name[40];
+  recv_name(i_name, sizeof(i_name));
+
   // Error if the file does not exist
-  FILINFO fno;
-  if (g_fatfs->exists(m_name_copy,&fno) == FR_OK)
+  if (resolve_name(i_name, m_name_copy, sizeof(m_name_copy), false))
   {
     // If 0000.mzf exists, delete it
     FILINFO fno;
@@ -547,7 +713,10 @@ void sendFileName(const uint8_t index)
   }
   sndbyte(0x00); // ok - got the file name
 
-  // send up to 32 characters of the display name, including null terminator if present
+  // File type first, so the ROM can honour the BASIC/machine-code filter
+  sndbyte(getFileAttr(index));
+
+  // send up to 32 characters of the IBF name, including null terminator if present
   // terminate at 0
   const char* name = getDisplayName(index);
   for (int i = 0; i < 32; i++) {
@@ -569,9 +738,10 @@ void sendFileData(const uint8_t index)
     return;
   }
 
-  char f_name[300]; // buffer for the filename  
-  strncpy(f_name, getFileName(index), sizeof(f_name) - 1);
-  f_name[sizeof(f_name) - 1] = '\0'; // ensure null termination
+  // Loading is by index, so the real SD path is used directly here rather
+  // than going back through an IBF name lookup.
+  char f_name[300];
+  addrootdir(f_name, getFileName(index), sizeof(f_name));
 
   _DEBUG("sendFileData: %s\n", f_name);
 
@@ -579,141 +749,76 @@ void sendFileData(const uint8_t index)
 }
 
 
-// SD system filelist
+// SD system filelist. Lists IBF names, matching the file menu.
 void dirlist(void)
 {
   // Get comparison string (up to 32+1 characters)
   char c_name[40];
-  rcv_filename32(c_name);
+  recv_name(c_name, sizeof(c_name));
 
   _DEBUG("dirlist: comparison string: %s\n", c_name);
 
-  // Open root directory
-  DIR dir;
-  FILINFO fno;
-  FRESULT result = f_opendir(&dir, ROOT_DIR);
-  
-  if (result != FR_OK)
+  establishFileList(ROOT_DIR);
+  const uint8_t count = getFileCount();
+  const size_t match_len = strlen(c_name);
+
+  int shown = 0;
+  uint8_t i = 0;
+  uint8_t page_start = 0;
+
+  while (i < count)
   {
-    sndbyte(0xF1);  // Error
-    return;
-  }
+    const char *name = getDisplayName(i);
 
-  int cntl2 = 0;
-  unsigned int br_chk = 0;
-  int page = 1;
-  
-  // Send files, pausing after 20 items
-  while (1)
-  {
-    result = f_readdir(&dir, &fno);
-
-    if (result != FR_OK || fno.fname[0] == '\0')
+    if (match_len == 0 || strncasecmp(name, c_name, match_len) == 0)
     {
-      // End of directory
-      if (cntl2 > 0 || page == 1)
-      {
-        // Send termination
-        sndbyte(0xFF);
-        sndbyte(0x00);
-      }
-      break;
-    }
+      _DEBUG("direntry %s\n", name);
 
-    // Ignore dotfiles and only show files with a .mzf extension (case-insensitive)
-    {
-      int len = strlen(fno.fname);
-      printf("dirlist: checking file %s\n", fno.fname);
-      if (len == 0 || fno.fname[0] == '.')
+      for (unsigned int lp1 = 0; lp1 < 36 && name[lp1] != '\0'; lp1++)
       {
-        continue;
-      }
-      if (len < 4)
-      {
-        continue;
-      }
-      const char *ext = &fno.fname[len - 3];
-      if (!((ext[0] == 'm' || ext[0] == 'M') &&
-            (ext[1] == 'z' || ext[1] == 'Z') &&
-            (ext[2] == 'f' || ext[2] == 'F')))
-      {
-        continue;
-      }
-    }
-
-    // Filter by match if needed
-    if (c_name[0] == 0x00 || strncasecmp(fno.fname, c_name, strlen(c_name)) == 0)
-    {
-      _DEBUG("direntry %s %u\n", fno.fname, fno.fsize);
-
-      // Send filename
-      unsigned int lp1 = 0;
-      while (lp1 < 36 && fno.fname[lp1] != 0x00)
-      {
-        sndbyte(upper(fno.fname[lp1]));
-        lp1++;
+        sndbyte(upper(name[lp1]));
       }
       sndbyte(0x0D);
       sndbyte(0x00);
-      cntl2++;
+      shown++;
     }
+    i++;
 
-    // Pause after 20 items or end of directory
-    if (cntl2 >= 20)
+    // Pause after a screenful
+    if (shown >= 20)
     {
       sndbyte(0xFE);  // Request for instructions
-      
-      br_chk = recbyte();  // Selection: 0=Continue, 'B'=Previous, Other=Terminate
-      
-      if (br_chk != 0 && br_chk != 0x42)
-      {
-        // Terminate
-        break;
-      }
-      
+
+      // Selection: 0 = continue, 'B' = previous page, anything else = stop
+      unsigned int br_chk = recbyte();
+      if (br_chk != 0 && br_chk != 0x42) return;
+
       if (br_chk == 0x42)
       {
-        // Go back to first file - reopen directory
-        f_closedir(&dir);
-        result = f_opendir(&dir, ROOT_DIR);
-        if (result != FR_OK)
-        {
-          sndbyte(0xF1);
-          break;
-        }
-        page = 1;
-        cntl2 = 0;
-        
-        if (page > 1)
-        {
-          // Skip to previous page (TODO: implement proper pagination)
-          cntl2 = 0;
-        }
+        // Step back over this page and the one before it
+        i = (page_start >= 20) ? (uint8_t)(page_start - 20) : 0;
       }
-      else
-      {
-        // Continue
-        page++;
-        cntl2 = 0;
-      }
+      page_start = i;
+      shown = 0;
     }
   }
 
-  f_closedir(&dir);
+  // Send termination
+  sndbyte(0xFF);
+  sndbyte(0x00);
 }
 
 
   // FILE DELETE
 void f_del(void)
   {
-    // Get filename
-  char f_name[40];
-  rcv_filename32(f_name);
-  addmzf(f_name);
+    // Get the IBF filename and find the file it names
+  char i_name[40];
+  recv_name(i_name, sizeof(i_name));
+  char f_name[300];
 
     // Error if the file does not exist
-    FILINFO fno;
-    if (g_fatfs->exists(f_name,&fno) == FR_OK)
+    if (resolve_name(i_name, f_name, sizeof(f_name), false))
     {
       // Sending status code (OK)
       sndbyte(0x00);
@@ -750,28 +855,38 @@ void f_del(void)
 // FILERENAME
 void f_ren(void)
 {
-  // Get the current file name
-  char f_name[40];
-  rcv_filename32(f_name);
-  addmzf(f_name);
+  // Get the current IBF filename and find the file it names
+  char i_name[40];
+  recv_name(i_name, sizeof(i_name));
+  char f_name[300];
 
   // Error if the file does not exist
-    FILINFO fno;
-  if (g_fatfs->exists(f_name,&fno) == FR_OK)
+  if (resolve_name(i_name, f_name, sizeof(f_name), false))
   {
     // Sending status code (OK)
     sndbyte(0x00);
 
     // Get new filename
-    char new_name[40];
-    rcv_filename32(new_name);
-    addmzf(new_name);
-      
+    char n_name[40];
+    recv_name(n_name, sizeof(n_name));
+
     // Sending status code (OK)
     sndbyte(0x00);
 
-    // Rename file
-    if (f_rename(f_name, new_name) == FR_OK)
+    // Fail if the new name is already in use as an IBF name
+    char new_name[300];
+    make_mzf_path(new_name, sizeof(new_name), n_name);
+
+    if (ibf_name_taken(n_name, f_name))
+    {
+      _DEBUG("%s already exists\n", n_name);
+      sndbyte(0xFF);
+      return;
+    }
+
+    // Rename the file, then put the new name inside the header too so the
+    // listing (which shows IBF names) reflects the change.
+    if (f_rename(f_name, new_name) == FR_OK && write_ibf_name(new_name, n_name))
     {
       // Sending status code (OK)
       sndbyte(0x00);
@@ -793,16 +908,15 @@ void f_ren(void)
         // FILE DUMP
 void f_dump(void)
 {
-  // Get filename
-  char f_name[40];
-  rcv_filename32(f_name);
-  addmzf(f_name);
+  // Get the IBF filename and find the file it names
+  char i_name[40];
+  recv_name(i_name, sizeof(i_name));
+  char f_name[300];
 
-  _DEBUG("fname %s\n", f_name);
+  _DEBUG("fname %s\n", i_name);
 
   // Error if the file does not exist
-  FILINFO fno;
-  if (g_fatfs->exists(f_name,&fno) == FR_OK)
+  if (resolve_name(i_name, f_name, sizeof(f_name), false))
   {
     // Sending status code (OK)
     sndbyte(0x00);
@@ -897,30 +1011,29 @@ void f_dump(void)
 // FILE COPY
 void f_copy(void)
 {
-  // Get the current file name
-  char f_name[40];
-  rcv_filename32(f_name);
-  addmzf(f_name);
+  // Get the current IBF filename and find the file it names
+  char i_name[40];
+  recv_name(i_name, sizeof(i_name));
+  char f_name[300];
 
-  _DEBUG("copy %s\n", f_name);
-  
+  _DEBUG("copy %s\n", i_name);
+
   // Error if the file does not exist
-  FILINFO fno;
-  if (g_fatfs->exists(f_name,&fno) == FR_OK)
+  if (resolve_name(i_name, f_name, sizeof(f_name), false))
   {
     // Sending status code (OK)
     sndbyte(0x00);
 
     // Get new filename
-    char new_name[40];
-    rcv_filename32(new_name);
-    addmzf(new_name);
+    char n_name[40];
+    recv_name(n_name, sizeof(n_name));
+    char new_name[300];
+    make_mzf_path(new_name, sizeof(new_name), n_name);
 
     _DEBUG("%s -> %s\n", f_name, new_name);
-    
-    // An error will occur if a file with the same name as the new file name already exists
-    FILINFO fno;
-    if (g_fatfs->exists(new_name,&fno) != FR_OK)
+
+    // An error will occur if a file with the same IBF name already exists
+    if (!ibf_name_taken(n_name, nullptr))
     {
       // Sending status code (OK)
       sndbyte(0x00);
@@ -955,9 +1068,18 @@ void f_copy(void)
           
           current_file_for_copy.close();
           current_file.close();  // Close both files
-          
-          // Sending status code (OK)
-          sndbyte(0x00);
+
+          // Give the copy its own IBF name, so the listing does not show two
+          // files under the same name.
+          if (write_ibf_name(new_name, n_name))
+          {
+            // Sending status code (OK)
+            sndbyte(0x00);
+          }
+          else
+          {
+            sndbyte(0xF1);
+          }
         }
         else
         {
@@ -1095,34 +1217,18 @@ void mon_lhead(void){
   m_lop = 128;
   
   
-  // Get filename
-  rcv_filename32(m_name);
-  // Terminate the filename at the carriage return.
-  char *end = static_cast<char *>(memchr(m_name, 0x0D, 33));
-  if (end != nullptr) {
-    *end = '\0';
-  }
+  // Get the IBF filename BASIC asked for
+  recv_name(m_name, sizeof(m_name));
+  _DEBUG("looking for header for '%s' in '%s'\n", m_name, ROOT_DIR);
 
-  strncpy(m_name_copy, m_name, sizeof(m_name_copy) - 1);
-  m_name_copy[sizeof(m_name_copy) - 1] = '\0';
-  strncat(m_name_copy, "*.mzf", sizeof(m_name_copy) - strlen(m_name_copy) - 1);
-    _DEBUG("looking for header for '%s' in '%s'\n",m_name_copy, ROOT_DIR);
-
-  // Error if the file does not exist
-  DIR dir;
-  FILINFO fno;
-
-
-  // find the first file beginning with the specified name in the root directory
-  // if (g_fatfs->exists(m_name_copy,&fno) == FR_OK)
-  if (f_findfirst(&dir, &fno, ROOT_DIR, m_name_copy) == FR_OK && fno.fname[0] != 0x00)
+  // Match on the IBF name inside the header, not the SD card filename.
+  // A leading-substring match is allowed so a name can be abbreviated after
+  // LOAD, which is how the old SD-filename wildcard search behaved.
+  if (resolve_name(m_name, m_name_copy, sizeof(m_name_copy), true))
   {
-    f_closedir(&dir);
     sndbyte(0x00);  // Send OK
     _DEBUG("ok\n");
-      addrootdir(m_name_copy, fno.fname, sizeof(m_name_copy));
 
-    
     // Open file for reading
     if (current_file.open(m_name_copy, FILE_READ) >= 0) {
       sndbyte(0x00);  // Another OK
@@ -1147,7 +1253,6 @@ void mon_lhead(void){
     }
   }
   else {
-    f_closedir(&dir);
     // Send status code (FILE NOT FOUND ERROR)
     sndbyte(0xF1);
     sdinit();
@@ -1434,7 +1539,7 @@ void SharpMZ_initialise()
     assert(fd_rom_size <= 0x0ff9); // Cannot drift into the bytes used for the SD card interface (0xFFFA-0xFFFF)
     // initialise the shadow memory
     for (int i = 0; i < EB_BUFFER_LENGTH; i++) {
-        if (i >= fd_rom_start && i <= fd_rom_start + fd_rom_size) {
+        if (i >= fd_rom_start && i < fd_rom_start + fd_rom_size) {
             eb_set(i, fd_rom_data[i-fd_rom_start]); // data byte in lower 8 bits
         } else {
             eb_set(i, 0); // default to 0 

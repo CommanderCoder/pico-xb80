@@ -14,11 +14,21 @@ Boot a File Menu which lists all files on the SD card.
 
 # File Menu
 
+## Help
+
+> H
+
+Display a help page explaining these navigation keys using 1 or 2 word phrases.
+
 ## Navigation
 
-> W S A D
+> W S
 
-Use W/S to move up and down the list, and A/D to turn pages forward and backward (if there are multiple pages of files)
+Use W/S to move up and down the list.
+
+> , .
+
+Use `,` and `.` to turn pages backward and forward (if there are multiple pages of files).
 
 > X or ENTER
 
@@ -26,15 +36,19 @@ Load and execute (run) the file
 
 > L
 
-Load the file but do not execute it
+Load the file but do not execute it.  The load address is reported and you are returned to the monitor, so the loaded program can be started with `G` when you are ready.
 
 > F
 
-Filter the list by the next letter that you type. e.g. `F  B` would list only files beginning with B.  
+Filter the list by the next letter that you type. e.g. `F  B` would list only files beginning with B.
+
+Press ENTER or SHIFT+BREAK at the `FILTER LETTER?` prompt to clear the filter and show every file again.
 
 > T
 
-Toggle between showing Basic and Machine code file types
+Toggle between showing Basic and Machine code file types.  Each press cycles `ALL` → `BASIC` → `M-CODE` → `ALL`, and the current setting is shown on the status line at the top of the screen.
+
+A file counts as machine code when its MZF header type byte is 01H, and as Basic for the other type codes.
 
 > A
 
@@ -44,9 +58,13 @@ Copy the file to `0000.mzf`.  This enables changing the autoboot file from withi
 
 Copy this file.  You will be prompted for a new filename.  If the new filename is the same as another [IBF filename](#ibf-filename) then the operation will fail.
 
+The new name is applied to both the [IBF filename](#ibf-filename) and the SDCard filename of the copy, so the copy does not inherit the original's name.
+
 > R
 
 Rename this file.  You will be prompted for a new filename.  If the new filename is the same as another [IBF filename](#ibf-filename) then the operation will fail.
+
+The new name is applied to both the [IBF filename](#ibf-filename) and the SDCard filename, exactly as it is when saving.  This is the way to give a file a name of its own when it shares one with another file.
 
 > D
 
@@ -73,6 +91,25 @@ Filenames on the SD card have a much larger limit, but when listing filenames an
 ### IBF filename
 
 Because files on tape or punch cards came sequentially, the filename is stored within the header of the file and not in a file table like they are on hard drives.  This filename is called the IBF by Yanataka.
+
+The File Menu lists IBF filenames, and every command that takes a filename matches on the IBF filename first, falling back to the SDCard filename if nothing matches.  That fallback is what lets `*FD` find `0000.mzf`, whose IBF filename is whatever program it happens to hold.
+
+### Duplicate IBF filenames
+
+Nothing stops two files having the same IBF filename, and it happens easily: a patched copy of a program usually keeps the header of the original it was made from.
+
+Where several files share an IBF filename, the listing tags each one `<1`, `<2`, `<3` and so on, in the order they are found on the card:
+
+```
+BASIC SP-5025<1
+BASIC SP-5025<2
+```
+
+The tag is added to the end of the name, or replaces the last few characters when the name is already too long to grow.  Use the tagged name to refer to one particular file.
+
+> The tags exist only in the listing.  **The files on the card are not altered** and their headers still hold the original name, so a tag can move if you add or remove files.  Use `R` to give a file a name of its own if you want one that will not change.
+
+An untagged name still works from BASIC and from the command line, and finds the first file carrying that name.
 
 ## Loading from BASIC and other programs patched for `Pico-XB80`
 

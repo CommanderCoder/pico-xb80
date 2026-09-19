@@ -55,12 +55,14 @@ void list_files_local(const char* extension, const char* rootdir)
 
 // build a local cache of the files in the root directory which end in .MZF or .mzf
 struct FileEntry {
-  FILINFO fno; // FATFS file info structure
-  char displayname[32]; // 32 characters for the filename
+  FILINFO fno;        // FATFS file info structure - the SD card filename
+  char rawname[IBF_NAME_MAX + 1];     // IBF name exactly as the header holds it
+  char displayname[IBF_NAME_MAX + 1]; // same, tagged <1 <2 ... if it is shared
+  uint8_t attr;       // MZF type byte (header offset 0)
 };
 
 // 255 not 256 because FileCount is a count, and not an index, so the maximum index is 254, which is 255 entries in total.
-static struct FileEntry FileList[255]; // 255 files, each with a max length of 32 characters
+static struct FileEntry FileList[255];
 static uint8_t FileCount = 0; // number of files found
 
 uint8_t getFileCount(void){
@@ -79,6 +81,113 @@ char* getFileName(uint8_t index){
     return nullptr; // or handle error as appropriate
   }
   return FileList[index].fno.fname;
+}
+
+char* getRawName(uint8_t index){
+  if (index >= FileCount) {
+    return nullptr;
+  }
+  return FileList[index].rawname;
+}
+
+uint8_t getFileAttr(uint8_t index){
+  if (index >= FileCount) {
+    return 0;
+  }
+  return FileList[index].attr;
+}
+
+// Read the MZF header prefix: byte 0 is the file type and bytes 1..17 hold the
+// IBF name terminated by CR. See OPERATING.md - the IBF name, not the SD card
+// filename, is what gets listed and what filenames are compared against.
+// Returns false if the file is too short or unreadable to carry a header.
+static bool readHeaderInfo(const char* path, uint8_t* attr, char* ibf, size_t ibf_len)
+{
+  FIL fp;
+  if (f_open(&fp, path, FA_READ) != FR_OK) {
+    return false;
+  }
+
+  uint8_t hdr[IBF_NAME_OFFSET + IBF_NAME_MAX];
+  UINT br = 0;
+  FRESULT res = f_read(&fp, hdr, sizeof(hdr), &br);
+  f_close(&fp);
+
+  if (res != FR_OK || br < sizeof(hdr)) {
+    return false;
+  }
+
+  *attr = hdr[0];
+
+  // Header names are a fixed-width field, so they are commonly padded with
+  // spaces at both ends. Trim them: the padding is not part of the name and
+  // a leading space would otherwise defeat the menu's first-letter filter.
+  size_t start = IBF_NAME_OFFSET;
+  size_t end = IBF_NAME_OFFSET + IBF_NAME_MAX;
+  for (size_t i = IBF_NAME_OFFSET; i < end; i++) {
+    if (hdr[i] == 0x0D) { end = i; break; }   // CR ends the name field
+  }
+  while (start < end && hdr[start] == ' ') start++;
+  while (end > start && hdr[end - 1] == ' ') end--;
+
+  size_t n = 0;
+  for (size_t i = start; i < end && n + 1 < ibf_len; i++) {
+    unsigned char c = hdr[i];
+    ibf[n++] = (c >= 32 && c <= 126) ? (char)c : '.';
+  }
+  ibf[n] = '\0';
+
+  return n > 0;
+}
+
+// Append "<n" to a name, overwriting its tail if there is no room to grow.
+static void tagName(char* name, size_t name_size, unsigned seq)
+{
+  char suffix[8];
+  int slen = snprintf(suffix, sizeof(suffix), "<%u", seq);
+  if (slen <= 0 || (size_t)slen >= name_size) return;
+
+  const size_t room = name_size - 1;      // characters the buffer can hold
+  size_t len = strlen(name);
+  size_t at = (len + (size_t)slen <= room) ? len : room - (size_t)slen;
+
+  memcpy(name + at, suffix, (size_t)slen);
+  name[at + (size_t)slen] = '\0';
+}
+
+// IBF names are not unique - a patched copy normally keeps the header of the
+// original it was built from, so two files happily claim the same name. Tag
+// every member of such a group <1, <2, <3 ... so each can be picked out of the
+// listing and referenced on its own.
+//
+// Only this scanned listing is tagged. The files on the card are not touched,
+// and rawname still holds what the header actually says.
+static void disambiguateNames(void)
+{
+  bool tagged[255] = { false };
+
+  for (uint8_t i = 0; i < FileCount; i++)
+  {
+    if (tagged[i]) continue;
+
+    // Count the files sharing this name, including this one
+    uint8_t shared = 0;
+    for (uint8_t j = i; j < FileCount; j++)
+    {
+      if (!tagged[j] && strcasecmp(FileList[j].rawname, FileList[i].rawname) == 0) shared++;
+    }
+    if (shared < 2) continue;
+
+    // Number them in the order the directory scan found them
+    const char* base = FileList[i].rawname;
+    unsigned seq = 0;
+    for (uint8_t j = i; j < FileCount; j++)
+    {
+      if (tagged[j] || strcasecmp(FileList[j].rawname, base) != 0) continue;
+      tagName(FileList[j].displayname, sizeof(FileList[j].displayname), ++seq);
+      tagged[j] = true;
+    }
+  }
 }
 
 void establishFileList(const char* rootdir)
@@ -105,31 +214,43 @@ void establishFileList(const char* rootdir)
     // Check for a .MZF/.mzf extension (case-sensitive match on both variants)
     if (len >= 4 && (!strcmp(fno.fname + len - 4, ".MZF") || !strcmp(fno.fname + len - 4, ".mzf")) && fno.fname[0] != '.')
     {
-        FileList[FileCount].fno = fno;
+        struct FileEntry* entry = &FileList[FileCount];
+        entry->fno = fno;
+        entry->attr = 0;
+        entry->rawname[0] = '\0';
 
-        // Build a sanitized, extension-stripped name for display
-        char displayname[32] = {0}; // zero-init guarantees null termination
+        // The name to list is the IBF name inside the header, not the SD
+        // card filename, so read it back out of the file itself.
+        char path[300];
+        snprintf(path, sizeof(path), "%s/%s", rootdir, fno.fname);
 
-        int n = len - 4; // length of filename without the extension
-        if (n > (int)sizeof(displayname) - 1)
-            n = sizeof(displayname) - 1; // clamp so we never write past displayname[]
+        if (!readHeaderInfo(path, &entry->attr,
+                            entry->rawname, sizeof(entry->rawname)))
+        {
+            // No usable header - fall back to the SD name minus ".mzf" so the
+            // file is still reachable rather than being listed as blank.
+            int n = len - 4;
+            if (n > (int)sizeof(entry->rawname) - 1)
+                n = sizeof(entry->rawname) - 1;
+            memcpy(entry->rawname, fno.fname, n);
+            entry->rawname[n] = '\0';
 
-        memcpy(displayname, fno.fname, n); // safe: n is bounded above
+            for (int i = 0; i < n; i++)
+                if ((unsigned char)entry->rawname[i] < 32 ||
+                    (unsigned char)entry->rawname[i] > 126)
+                    entry->rawname[i] = '.';
+        }
 
-        // Replace non-printable / non-ASCII bytes with '.' for safe display
-        for (int i = 0; i < n; i++)
-            if ((unsigned char)displayname[i] < 32 || (unsigned char)displayname[i] > 126)
-                displayname[i] = '.';
+        // Starts out identical - disambiguateNames() adds a tag below if this
+        // name turns out to be shared with another file.
+        memcpy(entry->displayname, entry->rawname, sizeof(entry->rawname));
 
-        // Copy into the file list entry, then force a terminator
-        // (strncpy won't null-terminate if src fills the whole count)
-        strncpy(FileList[FileCount].displayname, displayname, sizeof(FileList[FileCount].displayname) - 1);
-        FileList[FileCount].displayname[sizeof(FileList[FileCount].displayname) - 1] = '\0';
-
-        if (++FileCount >= 255) break; // stop once the list is full 
+        if (++FileCount >= 255) break; // stop once the list is full
     }
   }
   f_closedir(&dir);
+
+  disambiguateNames();
 
   // NOTE - FileCount is clamped to 255, so if there are more than 255 files, only the first 255 will be stored in FileList.
 
