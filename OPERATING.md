@@ -1,154 +1,156 @@
+# Operator Guide
 
+## Preparing SD Card
 
-Operating method
-　The following commands are available while waiting for the MONITOR command input.
+All files must be within a subfolder called /MZ_FD and they must be binary files (no zips *yet*) and they must have the extension `.mzf` (case insensitive)
 
-　Note that while the MZ-700's floppy disk drive startup command is actually just the letter 'F', we've standardized the operation method to use 'FD'.
+## `*FD`
 
-　In the following, the filenames assigned to files within the SD-CARD will be referred to as DOS filenames, and the filenames within the information block of MZT format files will be referred to as IBF filenames.
+Boot the file named 0000.mzf on the SD card use.  This is a convenience to startup any application quickly on the machine. A copy of BASIC is usually a good choice for this file.
 
-FD[CR]
-　The DOS file named "0000.MZT" will be loaded and executed using only the floppy disk.
+## `*FDF`
 
-　You can create "0000.MZT" by renaming and copying files like BASIC SP-5030 on your PC, but you can also create it using FDA commands.
+Boot a File Menu which lists all files on the SD card.
 
-FD DOS file name [CR]
-　This program loads and executes the binary file specified by its DOS filename.
+# File Menu
 
-　The ".MZT" extension is optional.
+## Navigation
 
-　This can be used as an alternative to the MONITOR's LOAD command. Note that the LOAD command can also be used, but it will be treated the same as a LOAD command from an application.
+> W S A D
 
-example)
+Use W/S to move up and down the list, and A/D to turn pages forward and backward (if there are multiple pages of files)
 
-FD　TEST[CR]
+> X or ENTER
 
-FD/DOS file name[CR] or FD/DOS file name[CR]
-　This command loads the binary file specified by its DOS filename. It does not execute the file.
+Load and execute (run) the file
 
-　The ".MZT" extension is optional.
+> L
 
-example)
+Load the file but do not execute it
 
-FD/TEST[CR]
+> F
 
-FD/　TEST[CR]
+Filter the list by the next letter that you type. e.g. `F  B` would list only files beginning with B.  
 
-FDL[CR]
-　This displays a list of files in the SD-CARD root directory. After displaying 20 items, it will wait for further instructions. To stop, press SHIFT+BREAK or the up arrow key. Press the B key to return to the previous 20 items. Press any other key to display the next 20 items.
+> T
 
-　Since the files are displayed with "*FD" appended to the beginning of each line, you can load and execute them simply by moving the cursor to the file you want to run and pressing the [CR] key.
+Toggle between showing Basic and Machine code file types
 
-　The displayed order is the order in which the files were registered; it is not possible to display them in a sorted order such as alphabetical order of filenames.
+> A
 
-FDL　x[CR]
-This displays a list of files whose filenames begin with "x". It will wait for instructions after displaying 20 files. To stop, press SHIFT+BREAK or the up arrow key. Press the B key to return to the previous 20 files. Press any other key to display the next 20 files.
+Copy the file to `0000.mzf`.  This enables changing the autoboot file from within the file menu.
 
-x represents a string of up to 32 characters that can be entered from the MZ keyboard (numbers, symbols, and letters).
+> C 
 
-example)
+Copy this file.  You will be prompted for a new filename.  If the new filename is the same as another [IBF filename](#ibf-filename) then the operation will fail.
 
-FDL S[CR]
+> R
 
-FDL SP[CR]
+Rename this file.  You will be prompted for a new filename.  If the new filename is the same as another [IBF filename](#ibf-filename) then the operation will fail.
 
-FDL BASIC S[CR]
+> D
 
-FDA DOS file name [CR]
-　This command renames and copies the file specified by its DOS filename to "0000.MZT".
+Delete this file. You will be prompted to confirm.
 
-　It's easy: simply select the filename displayed by the FDL command with the cursor, add only "A" to "*FD" at the beginning of the line, and press the [CR] key. 
+> P
 
-FDS SAVE start address SAVE end address Execution start address DOS file name [CR]
-　This command saves the data from the save start address to the save end address using a DOS filename.
+Printout (Dump to screen) the contents of the file as 128 bytes per screen.
 
-　The save start address, save end address, and execution start address are specified using 4-digit hexadecimal numbers. The ".MZT" in the DOS filename is optional.
+Once one screen is displayed, it will show "NEXT:ANY BACK:B BREAK:SHIFT+BREAK" and wait for instructions. Press B to display the previous 128 bytes, SHIFT+BREAK to cancel, and any other key to display the next 128 bytes.
 
-example)
+If the file size is not divisible by 128 bytes, the last page will be filled with 00H until it reaches 128 bytes.
 
-FDS　1200　2FFF　1200　TEST[CR]
+> SHIFT+BREAK
 
-FDC DOS file name [CR]
-　This will copy the file specified by its DOS filename.
+Exit back to the monitor.
 
-　It's easy: simply select the filename displayed by the FDL command with the cursor, add only "C" to "*FD" at the beginning of the line, and press the [CR] key.
+## Filenames
 
-　Enter a DOS file name and press the [CR] key. It will then ask "NEW NAME:", so enter the new DOS file name and press the [CR] key again.
+Filenames on cassette are limited to 16 characters (plus a terminator character).
 
-　If you specify an existing DOS file name as the new DOS file name, the copy process will be interrupted.
+Filenames on the SD card have a much larger limit, but when listing filenames and referencing files from programs like BASIC, the [IBF filename](#ibf-filename) is used from with in the file header.
 
-example)
+### IBF filename
 
-FDC　TEST[CR]
+Because files on tape or punch cards came sequentially, the filename is stored within the header of the file and not in a file table like they are on hard drives.  This filename is called the IBF by Yanataka.
 
-NEW NAME:TEST2[CR]
+## Loading from BASIC and other programs patched for `Pico-XB80`
 
-FDR DOS file name [CR]
-　This renames the file specified by its DOS filename.
+BASIC and other programs will call routines within the monitor to load and save (*punch*) files.  These would take the file in memory and save it to cassette (or punch card!) starting at a known address, for a known length, and with a known execution address when it is loaded again.
 
-　It's easy: simply select the filename displayed by the FDL command with the cursor, add only "R" to "*FD" at the beginning of the line, and press the [CR] key.
+> ⚠️ SAVE filenames must have fewer than 17 characters.
 
-　Enter a DOS file name and press the [CR] key. It will then ask "NEW NAME:", so enter the new DOS file name and press the [CR] key again.
+Just like with Cassette (CMT), please enter the file name and other information according to the input method and rules specified by the application and save it.
 
-　If you specify an existing DOS file name as the new DOS file name, the process will be interrupted without renaming.
+When saving, the entered filename will be applied to both the [IBF filename](#ibf-filename) and the SDCard filename.
 
-example)
+The `.mzf` extension is automatically added to the SDCard filename.
 
-FDR　TEST[CR]
+For example, in BASIC SP-5030...
 
-NEW NAME:TEST2[CR]
+`SAVE "TEST"`
 
-FDD DOS file name [CR]
-　This command deletes the file specified by its DOS filename.
+Will create a BASIC file called TEST.mzf with the IBF filename `TEST`.
 
-　It's easy: simply select the filename displayed by the FDL command with the cursor, add only "D" to "*FD" at the beginning of the line, and press the [CR] key.
+> ⚠️ LOAD filenames must have fewer than 17 characters.
 
-　Enter a DOS file name and press the [CR] key. You will be prompted with "FILE DELETE? (Y:OK ELSE:CANSEL)". Press Y to delete the file. Pressing any other key will cancel the deletion.
+Although you can specify an IBF file name after commands such as L and LOAD specified by the application, simply press the ENTER key after the command such as L or LOAD without specifying an IBF filename will display the File Menu.
 
-FDP DOS filename [CR]
-　This program will dump the contents of the file specified by the DOS filename.
+# Additional Command Line (after Yanataka MZ80K-SD)
 
-　It's easy: simply select the filename displayed by the FDL command with the cursor, add only "P" to "*FD" at the beginning of the line, and press the [CR] key.
+## FD
 
-　Enter a DOS file name and press the [CR] key to display the file contents as 128 bytes per screen.
+The following commands are available from the MONITOR command input.  That is the `*` prompt.  All filenames are their [IBF filename](#ibf-filename) not the filename on the SDCard.
 
-　Once one screen is displayed, it will show "NEXT:ANY BACK:B BREAK:SHIFT+BREAK" and wait for instructions. Press B to display the previous 128 bytes, SHIFT+BREAK to cancel, and any other key to display the next 128 bytes.
+> FDS saddr eaddr xaddr filename
 
-　If the file size is not divisible by 128 bytes, the last page will be filled with 00H until it reaches 128 bytes.
+This command saves the data from the save start address to the save end address using the given filename.  The filename must have fewer than 17 characters and it will be the IBF filename, and the SDCard filename suffixed with `.mzf`
 
-　You cannot rewrite the file contents.
+The save start address, save end address, and execution start address are specified using 4-digit hexadecimal numbers.
 
-FDM start address [CR]
-　This displays the memory contents of the MZ-80K, starting from the address, in 128-byte segments per screen.
+`*FDS　1200　2FFF　1200　TEST`
 
-　Once one screen is displayed, it will show "NEXT:ANY BACK:B BREAK:SHIFT+BREAK" and wait for instructions. Press B to display the previous 128 bytes, SHIFT+BREAK to cancel, and any other key to display the next 128 bytes.
 
-　You can cancel the display at any time by pressing SHIFT+BREAK, even while a single screen is being displayed.
+> FDM saddr
 
-FDW start address 1 byte (2 hexadecimal digits) data [CR]
-　The 2-digit hexadecimal data, starting from the address, is written to the MZ-80K's memory.
+This displays the memory contents of the MZ-80K, starting from the address, in 128-byte segments per screen.
 
-　Enter the data to be written as two hexadecimal digits after the starting address, and then press the [CR] key. Spaces separating the data will be ignored, so they can be included or omitted.
+Once one screen is displayed, it will show "NEXT:ANY BACK:B BREAK:SHIFT+BREAK" and wait for instructions. Press B to display the previous 128 bytes, SHIFT+BREAK to cancel, and any other key to display the next 128 bytes.
 
-　You can have any number of byte data entries in a 2-digit hexadecimal format, as long as they fit on a single line.
+You can cancel the display at any time by pressing SHIFT+BREAK, even while a single screen is being displayed.
 
-　Enter a line of data and press the [CR] key to write it down. The next address will then be displayed, allowing you to continue entering data.
+> FDW saddr hexbytes* [CR]
 
-　Furthermore, by correcting the address, it is possible to go back and make corrections or write data to a different address.
+The hexbyte (multiple 2-digit hexadecimal values), starting from the address, is written to the MZ-80K's memory.
 
-　To stop writing data, press the [CR] key without writing any data to the displayed address.
+Enter the data to be written as two hexadecimal digits after the starting address, and then press the ENTER key. Spaces separating the data will be ignored, so they can be included or omitted.
 
-　If you enter a number other than hexadecimal and press the [CR] key, the system will write the valid data up to the point immediately before the non-hexadecimal input and display the next address.
+You can have any number of byte data entries in a 2-digit hexadecimal format, as long as they fit on a single line.
 
-example)
+Enter a line of data and press the ENTER key to write it into memory. The next address will then be displayed, allowing you to continue entering data.
 
-*FDW　1200　01　02　03　04　05　06　07　08[CR]
+Furthermore, by correcting the address, it is possible to go back and make corrections or write data to a different address.
 
-*FDW　1200　0102030405060708[CR]
+To stop writing data, press the ENTER key without writing any data to the displayed address.
 
-*FDW 1200[CR] (when stopping)
+If you enter a number other than hexadecimal and press the ENTER key, the system will write the valid data up to the point immediately before the non-hexadecimal input and display the next address.
 
-*FDW 1200 12 34 5/[CR] (Written up to 12 34)
+`*FDW　1200　01　02　03　04　05　06　07　08`
+
+`*FDW　1200　0102030405060708`
+
+`*FDW 1200` (when stopping)
+
+`*FDW 1200 12 34 5/` (Written up to 12 34)
+
+
+
+
+# MZ700
+
+    There is no support for MZ700 yet.
+
+Note that while the MZ-700's floppy disk drive startup command is actually just the letter 'F', we've standardized the operation method to use 'FD'.
 
 FDZ[CR]
 　[For MZ-700 only] This program functions the same as "FT.MZT," which was created for the MZ-700. After copying MONITOR 1Z-009A or 1Z-009B to the back RAM and applying the patch, the MONITOR on the back RAM will start.
@@ -162,51 +164,12 @@ FDU[CR]
 
 　If executed on an MZ-80K, it will result in a RESET operation.
 
-Loading from the application
-　Although you can specify an IBF file name after commands such as L and LOAD specified by the application, simply press the [CR] key after the command such as L or LOAD without specifying an IBF file name.
+# S-OS SWORD
 
-　In the case of CMT, you would normally be instructed to press the PLAY button here, but it will display "DOS FILE:" and wait for input, so enter the DOS file name and press the [CR] key. At this point, you can omit entering ".MZT".
+    This is untested.
 
-　DOS filenames are limited to 32 characters, excluding ".MZT" extensions. However, half-width katakana characters and certain symbols are not recognized by Arduino and cannot be used. When naming files on a computer, please use only letters, numbers, and spaces.
 
-For example, in BASIC SP-5030...
+When using [S-OS SWORD](https://handwiki.org/wiki/Software%3AS-OS), immediately after startup, set the device to "DV S:" and configure each device as a SYSTEM device.
 
-× LOAD "TEST"[CR]
+This might only be the case with FUZZY BASIC, but when using a common format device, I couldn't omit the IBF file name with the LOAD command.
 
-○ LOAD[CR]
-
-　DOS FILE:TEST[CR]
-
-○ LOAD[CR]
-
-　DOS FILE:TEST.MZT[CR]
-
-**Reference**
-
-　When using S-OS SWORD, immediately after startup, set the device to "DV S:" and configure each device as a SYSTEM device.
-
-　This might only be the case with FUZZY BASIC, but when using a common format device, I couldn't omit the IBF file name with the LOAD command.
-
-Special commands during LOAD
-　When "DOS FILE:" is displayed and the system is waiting for input, the following special commands can be used.
-
-*FDL[CR]
-*FDL x[CR]
-　You can use file listing functionality that is exactly the same as FDL and FDL x, after waiting for the MONITOR command input.
-
-　The search results are displayed with "DOS FILE:" appended to the beginning of each line, so you can load a file simply by moving the cursor to the file you want and pressing the [CR] key.
-
-　Some applications revert to "DOS FILE:" when you search for "*FDL" and select it with the cursor to try and load it. However, you can load it by placing the cursor again and pressing [CR].
-
-SAVE from application
-　Just like with CMT, please enter the file name and other information according to the input method and rules specified by the application and save it.
-
-　However, half-width katakana characters cannot be used because Arduino cannot recognize them. Please specify using letters, numbers, and spaces.
-
-　When saving, the entered file name will be applied to both the IBF file name and the DOS file name.
-
-　The ".MZT" extension is automatically added to the filename as a DOS file.
-
-For example, in BASIC SP-5030...
-
-○ SAVE "TEST"[CR]

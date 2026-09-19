@@ -220,9 +220,7 @@ void print_current_file_diag(){
 
 void addrootdir(char* f_name_copy, const char* f_name, size_t max_len)
 {
-  strncpy(f_name_copy, ROOT_DIR, max_len - 1);
-  strncat(f_name_copy, "/", max_len - strlen(f_name_copy) - 1);
-  strncat(f_name_copy, f_name, max_len - strlen(f_name_copy) - 1);
+  snprintf(f_name_copy, max_len, "%s/%s", ROOT_DIR, f_name);
 }
 
 
@@ -1096,18 +1094,34 @@ void mon_lhead(void){
   // Clear Read Data Points
   m_lop = 128;
   
+  
   // Get filename
   rcv_filename32(m_name);
-  addmzf(m_name);
-  addrootdir(m_name_copy, m_name, sizeof(m_name_copy));
-    _DEBUG("looking for header for '%s'\n",m_name_copy);
+  // Terminate the filename at the carriage return.
+  char *end = static_cast<char *>(memchr(m_name, 0x0D, 33));
+  if (end != nullptr) {
+    *end = '\0';
+  }
+
+  strncpy(m_name_copy, m_name, sizeof(m_name_copy) - 1);
+  m_name_copy[sizeof(m_name_copy) - 1] = '\0';
+  strncat(m_name_copy, "*.mzf", sizeof(m_name_copy) - strlen(m_name_copy) - 1);
+    _DEBUG("looking for header for '%s' in '%s'\n",m_name_copy, ROOT_DIR);
 
   // Error if the file does not exist
+  DIR dir;
   FILINFO fno;
-  if (g_fatfs->exists(m_name_copy,&fno) == FR_OK)
+
+
+  // find the first file beginning with the specified name in the root directory
+  // if (g_fatfs->exists(m_name_copy,&fno) == FR_OK)
+  if (f_findfirst(&dir, &fno, ROOT_DIR, m_name_copy) == FR_OK && fno.fname[0] != 0x00)
   {
+    f_closedir(&dir);
     sndbyte(0x00);  // Send OK
     _DEBUG("ok\n");
+      addrootdir(m_name_copy, fno.fname, sizeof(m_name_copy));
+
     
     // Open file for reading
     if (current_file.open(m_name_copy, FILE_READ) >= 0) {
@@ -1117,7 +1131,7 @@ void mon_lhead(void){
       // Read and send 128 bytes of header
       for (unsigned int lp1 = 0; lp1 < 128; lp1++){
         uint8_t i_data = current_file.readByte();
-
+      _DEBUG("%02x ",i_data);
         sndbyte(i_data);
 
         }
@@ -1133,6 +1147,7 @@ void mon_lhead(void){
     }
   }
   else {
+    f_closedir(&dir);
     // Send status code (FILE NOT FOUND ERROR)
     sndbyte(0xF1);
     sdinit();
@@ -1142,7 +1157,7 @@ void mon_lhead(void){
 // //04F8H MONITOR Read Data Replacement Processing
 void mon_ldata(void){
 
-  addrootdir(m_name_copy, m_name, sizeof(m_name_copy));
+  // addrootdir(m_name_copy, m_name, sizeof(m_name_copy));
     _DEBUG("looking for data for '%s'\n",m_name_copy);
 
     /** CHECK THE FILE EXISTS STILL */

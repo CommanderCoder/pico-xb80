@@ -6,3 +6,4 @@ build
 .cache/*
 tools/sjasmplus
 sharp-mz80k/FD_rom.h
+minicom.cap
