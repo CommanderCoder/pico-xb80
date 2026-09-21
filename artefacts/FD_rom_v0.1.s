@@ -1,3 +1,8 @@
+; Copyright (c) Andrew Hague (Commander Coder), 21 September 2026
+;
+; This code may not be reused, in whole or in part, without attribution
+; to the author, Andrew Hague (Commander Coder).
+
 ; Based on work by Yanataka 
 ; https://github.com/yanataka60/MZ80K_SD
 

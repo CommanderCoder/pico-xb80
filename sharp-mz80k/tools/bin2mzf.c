@@ -1,3 +1,6 @@
+// From a GenAI model but looks like it was taken from human code. (Markku Reunanen - https://www.kameli.net/marq/?page_id=974)
+// I have not verified the correctness of this code. Use at your own risk.
+
 // The crudest possible bin -> mzf converter
 
 #include <stdio.h>

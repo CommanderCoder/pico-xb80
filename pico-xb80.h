@@ -1,3 +1,8 @@
+// Copyright (c) Andrew Hague (Commander Coder), 21 September 2026
+//
+// This code may not be reused, in whole or in part, without attribution
+// to the author, Andrew Hague (Commander Coder).
+
 #pragma once
 
 // MZF header layout: byte 0 is the file type, bytes 1..17 hold the IBF name
@@ -14,6 +19,6 @@ uint8_t getFileAttr(uint8_t index);   // MZF type byte
 
 void establishFileList(const char* rootdir="/");
 
-void list_files_local(const char* extension, const char* rootdir="/"); // TEMPORARY DIAGNOSTIC: list every .MZF file on the SD card directly on the Pico side (no Z80/PIO involvement at all), to check the SD/FatFs listing logic in isolation from the Z80 transport. Remove once confirmed working.
+void list_files_local(const char* extension, const char* rootdir="/"); // Diagnostic: Pico-side listing of the .MZF files, run by sdinit() after each mount
 
 void set_led(bool on=false);

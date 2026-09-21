@@ -80,10 +80,7 @@ add_custom_command(
     # 1. Set the working directory properly for all commands
     WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/sharp-mz80k"
 
-# 2. Quote paths to tools and outputs to safely handle the space in "Z80 Asm"
-    # COMMAND "${CMAKE_CURRENT_LIST_DIR}/tools/sjasmplus" FD_rom1.s --lst --raw=FD_rom1.bin
-    # COMMAND "${CMAKE_CURRENT_LIST_DIR}/tools/sjasmplus" FD_rom2.s --lst --raw=FD_rom2.bin
-    # COMMAND "${CMAKE_CURRENT_LIST_DIR}/tools/sjasmplus" FD_rom.s --lst --raw=${ROM_BIN_OUTPUT}
+# 2. Quote paths to tools and outputs so spaces in the project path are safe
     COMMAND "${CMAKE_CURRENT_LIST_DIR}/tools/sjasmplus" FD_rom.s --lst --raw=${ROM_BIN_OUTPUT}
     COMMAND python3 "${CMAKE_CURRENT_LIST_DIR}/tools/bin2header.py" "${ROM_BIN_OUTPUT}" "${ROM_HEADER_OUTPUT}"
     

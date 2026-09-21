@@ -1,3 +1,8 @@
+// Copyright (c) Andrew Hague (Commander Coder), 21 September 2026
+//
+// This code may not be reused, in whole or in part, without attribution
+// to the author, Andrew Hague (Commander Coder).
+
 #include <stdio.h>
 #include <stdint.h>
 #include <strings.h> 
@@ -14,9 +19,10 @@
 
 
 
-// TEMPORARY DIAGNOSTIC: list every .MZF file on the SD card directly on the
-// Pico side (no Z80/PIO involvement at all), to check the SD/FatFs listing
-// logic in isolation from the Z80 transport. Remove once confirmed working.
+// Diagnostic: list every .MZF file on the SD card directly on the Pico side
+// (no Z80/PIO involvement at all). Called from sdinit() after each successful
+// mount as a sanity check of the SD/FatFs listing logic, independent of the
+// Z80 transport.
 void list_files_local(const char* extension, const char* rootdir)
 {
   DIR dir;
@@ -290,13 +296,15 @@ int main(void) {
 
    
 
-    // Initialize the SD card and FatFs
+    // Start the Z80 expansion bus interface (PIO + DMA shadow memory). The
+    // SD card and FatFs are brought up later by sdinit() from the command loop.
     start_xb_interface();
 
     // Initialise the Sharp MZ series interface
     SharpMZ_initialise();
     
-  // prep GPIO for LED - must come after setup of interface since that will change pin 25 state to input for the SD card interface
+  // prep GPIO for LED - must come after setup of interface 
+  // since that will change pin 25 state to input for the SD card interface
 
     init_led();
 

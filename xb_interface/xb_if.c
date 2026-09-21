@@ -1,3 +1,8 @@
+// Copyright (c) Andrew Hague (Commander Coder), 21 September 2026
+//
+// This code may not be reused, in whole or in part, without attribution
+// to the author, Andrew Hague (Commander Coder).
+
 /* Heavily based on ATOM-DVI EB methods */
 
 #include "xb_if.h"
@@ -5,7 +10,7 @@
 
 #include "hardware/sync.h"
 
-// using 0xFF00 in shadow memory as a communication area - Z80 writes commands and data here, and we can read it and respond accordingly
+// using 0xFFFA-0xFFFD in shadow memory as a communication area - Z80 writes commands and data here, and we can read it and respond accordingly
 
 #define Z80_TO_PICO_DATA     0xFFFA
 #define Z80_TO_PICO_FLAG     0xFFFB
@@ -236,14 +241,14 @@ static void eb_setup_dma_read()
     // Fixed write address — always targets the same PIO TX FIFO register, not a buffer
     channel_config_set_write_increment(&c, false);
 
-    // When this transfer completes, automatically trigger address_chan1 to set up the next read address
+    // When this transfer completes, automatically trigger address_chan to set up the next read address
     channel_config_set_chain_to(&c, address_chan); 
 
     dma_channel_configure(
         read_data_chan,                 // DMA channel being configured
         &c,                            // Channel config built above
         &eb2_dataread_pio->txf[eb2_dataread_sm],    // Destination: TX FIFO of the EB2 data-read state machine
-        NULL,                       // Source: let the chained DMA channel set the read address; offset supplied by chained address_chan2
+        NULL,                       // Source: let the chained DMA channel set the read address; supplied by address_chan
         1,                             // Transfer 1 x 16-bit word per trigger
         false                          // Do not start immediately — awaits explicit trigger or chain
     );
@@ -260,14 +265,15 @@ static void eb_setup_dma_write(void)
      *          v
      *   address_chan
      *          |
-     *          +----> read_data_chan.READ_ADDR + TRIGGER
-     *          |
-     *          +----> save_addr_chan
-     *                         |
-     *                         +----> write_data_chan.WRITE_ADDR
+     *          +----> write_read_data_chan.READ_ADDR + TRIGGER
      *
-     *   read_data_chan:
+     *   write_read_data_chan:
      *          RAM[address] ---> PIO TX FIFO
+     *                 |
+     *                 +--> chain to save_addr_chan
+     *
+     *   save_addr_chan:
+     *          write_read_data_chan.READ_ADDR ---> write_data_chan.WRITE_ADDR
      *
      *   PIO:
      *          PULL BLOCK
@@ -366,7 +372,7 @@ static void eb_setup_dma_write(void)
     // DMA_SIZE_16 is intentional here: the memory entry is 16 bits.
     //
     // A narrow 16-bit write to the PIO FIFO is replicated into the 32-bit
-    // FIFO word on RP2040, which is suitable for a subsequent PULL.
+    // FIFO word on RP2040/RP2350, which is suitable for a subsequent PULL.
     // =========================================================================
 
     c = dma_channel_get_default_config(write_read_data_chan);
@@ -458,7 +464,7 @@ static void eb_setup_dma_write(void)
         &dma_channel_hw_addr(write_read_data_chan)->read_addr,
 
         1,              // one 32-bit address
-        false           // started by chain from address_chan
+        false           // started by chain from write_read_data_chan
     );
 
 
@@ -535,7 +541,9 @@ static void eb_setup_dma_write(void)
 
 void wait_z80_mailbox_empty()
 {
-    // if ROM has loaded, the Z80 will have set the mailbox flag to 1, so we need to wait for it to clear before we can send a response
+    // Mirror of the Z80's COMMS_INIT (FD_rom.s): the Z80 clears Z80_TO_PICO_FLAG
+    // and then waits for PICO_TO_Z80_FLAG to clear. Wait for its side to be
+    // empty, then mark ours empty.
     _DEBUG("Waiting for empty recv mailbox from Z80...\n");
 
     // hold here while mailbox is not empty
@@ -562,7 +570,7 @@ void eb_init()
 
     _DEBUG("Initializing Expansion Bus...\n");
 
-    // Initialize PIO state machines in order: address, read, write
+    // Initialize PIO state machines: read, then write
     eb2_read_program_init();
     eb2_write_program_init();
     _DEBUG("Combined program initialized.\n");
@@ -601,13 +609,14 @@ void start_xb_interface()
 
 
 
-// TEMPORARY DIAGNOSTIC: fires once if a mailbox wait loop below stalls for an
-// unreasonably long time, dumping the flag byte we're waiting on plus the
+// TEMPORARY DIAGNOSTIC: fires every EB_STALL_THRESHOLD spins while a mailbox
+// wait loop below is stalled, dumping the flag byte we're waiting on plus the
 // write DMA chain's last-captured-address vs current-write-target (same pair
 // the earlier "addr chain" diagnostic compared) to help catch a Z80 write
 // (typically the PICO_TO_Z80_FLAG/Z80_TO_PICO_FLAG clear in RCVBYTE/SNDBYTE)
 // that never landed. Does NOT change behavior — the caller keeps waiting.
-// Remove once the FDL stall is root-caused.
+// Only wired into sndbyte_z80 at present; the recbyte_z80 call is commented
+// out. Remove once the FDL stall is root-caused.
 #define EB_STALL_THRESHOLD 2000000u
 
 static void eb_stall_report(const char *where, uint16_t flag_addr, uint16_t data_addr)

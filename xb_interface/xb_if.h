@@ -1,3 +1,8 @@
+// Copyright (c) Andrew Hague (Commander Coder), 21 September 2026
+//
+// This code may not be reused, in whole or in part, without attribution
+// to the author, Andrew Hague (Commander Coder).
+
 /* 
 
   Expansion Bus Interface for Z80 bus
@@ -9,7 +14,7 @@
 
 /*
 
-PIO/DMA interface to the 6502 bus
+PIO/DMA interface to the Z80 bus (adapted from Atom-DVI's 6502 bus interface)
 
 Copyright 2021-2025 Chris Moulang
 
@@ -69,13 +74,12 @@ extern "C"
 {
 #endif
 
-// Sized in xb_if.c (currently EB_BUFFER_LENGTH plus a few guard
-// elements used by a temporary diagnostic) — declared without a bound here so
-// this doesn't need to track that.
+// Sized in xb_if.c as EB_BUFFER_LENGTH entries — declared without a bound
+// here so this doesn't need to track that.
 //
 // NOTE - this shadows the Z80's *entire* 64K memory map (128KB of Pico RAM,
 // data+permission byte per address) purely so a handful of memory-mapped
-// handshake registers (Z80_TO_PICO_DATA/FLAG etc, see "Z80 Asm/FD_rom1.s")
+// handshake registers (Z80_TO_PICO_DATA/FLAG etc, see sharp-mz80k/FD_rom.s)
 // and the FD ROM shadow can be decoded by raw 16-bit address. If the Z80
 // side moves to IN/OUT (IOREQ) for the handshake instead of LD (nn) (MREQ),
 // this table only needs to cover the 8-bit I/O port space (<=256 entries)
@@ -109,7 +113,7 @@ static inline void print_perm_range()
 }
 
 /// @brief set the read/write permissions for an address
-/// @param address 6502 address
+/// @param address Z80 address
 /// @param  perm see enum for possible values
 static inline void eb_set_perm_byte(uint16_t address, enum eb_perm perm) {
     if (perm != EB_PERM_NONE) {
@@ -122,7 +126,7 @@ static inline void eb_set_perm_byte(uint16_t address, enum eb_perm perm) {
 }
 
 /// @brief set the read/write permissions for a range of addresses
-/// @param start 6502 starting address
+/// @param start Z80 starting address
 /// @param  perm see enum for possible values
 /// @param size number of bytes to set
 static inline void eb_set_perm(uint16_t start, enum eb_perm perm, size_t size)
@@ -135,7 +139,7 @@ static inline void eb_set_perm(uint16_t start, enum eb_perm perm, size_t size)
 }
 
 /// @brief get a byte value
-/// @param address the 6502 address
+/// @param address the Z80 address
 /// @return the value of the byte
 static inline uint8_t eb_get(uint16_t address)
 {
@@ -143,7 +147,7 @@ static inline uint8_t eb_get(uint16_t address)
 }
 
 /// @brief set a byte to a new value
-/// @param address the 6502 address
+/// @param address the Z80 address
 /// @param value the new value
 static inline void eb_set(uint16_t address, unsigned char value)
 {

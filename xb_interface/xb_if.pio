@@ -29,8 +29,8 @@ https://copilot.microsoft.com/shares/5pAqiwKpG3UoPwfFo242L
 ; eb2_read and eb2_write trigger purely off NRD/NWR and decode the full
 ; 16-bit address, so a Z80 memory access and an IO access that happen to
 ; share the same low byte are handled identically today. If the transfer
-; protocol moves to IN/OUT-based IOREQ cycles (see the note by
-; Z80_TO_PICO_DATA in "Z80 Asm/FD_rom1.s"), gate these loops on
+; protocol moves to IN/OUT-based IOREQ cycles (the mailbox equates are at
+; Z80_TO_PICO_DATA in sharp-mz80k/FD_rom.s), gate these loops on
 ; `wait 0 gpio, PIN_NIOREQ` and drop the address capture down to 8 bits
 ; (A0-A7) - simpler decode here, and it frees the Pico-side table in
 ; xb_if.h from a 64K-entry shadow down to <=256 entries.

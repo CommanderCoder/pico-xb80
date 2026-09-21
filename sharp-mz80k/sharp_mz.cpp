@@ -1,3 +1,8 @@
+// Copyright (c) Andrew Hague (Commander Coder), 21 September 2026
+//
+// This code may not be reused, in whole or in part, without attribution
+// to the author, Andrew Hague (Commander Coder).
+
 #include "sharp_mz.h"
 #include "fatfs/ff.h"
 #include "fatfs_interface.h"
@@ -14,8 +19,8 @@
 // track 0 into ram address 0x9800 (i.e. machine needs > 36Kb) and then executed at that address. 
 // (128 bytes per sector)
 
-// Possibly do the same by loading boot.mzf into 0x9800 and running it when FD is used (only if boot.mzf exists)
-// and use *FDS to skip booting.
+// *FD does the equivalent by loading and running 0000.mzf (see FDBOOT in
+// FD_rom.s). *FDF opens the file menu and *FDS saves a memory block.
 
 char m_name_copy[130]; // includes path
 unsigned long m_lop=128;
@@ -175,7 +180,7 @@ void sdinit(void){
 
   
   if (!sd_missing) {
-    list_files_local("mzf", ROOT_DIR); // TEMPORARY DIAGNOSTIC
+    list_files_local("mzf", ROOT_DIR); // Pico-side listing as a mount sanity check
   }
 
 }
@@ -210,7 +215,6 @@ void print_current_file_diag(){
   printf("Flag Breakdown:\n");
   printf("  - FA_READ:         %s\n", (filval->flag & 0x01) ? "YES" : "NO");
   printf("  - FA_WRITE:        %s\n", (filval->flag & 0x02) ? "YES" : "NO");
-  printf("  - FA_OPENED:       %s\n", (filval->flag & 0x01) ? "YES" : "NO"); // Usually matches read/write state
   printf("  - FA_MODIFIED:     %s\n", (filval->flag & 0x40) ? "YES" : "NO");
   printf("=======================================\n");
 #endif 
@@ -561,7 +565,7 @@ void f_send(const char* f_name_copy)
     // Read file type
     uint8_t wk1 = current_file.readByte();
     
-    // Read and send program name (16 bytes)
+    // Read and send program name (17 bytes: the IBF name field)
     for (unsigned int lp1 = 0; lp1 <= 16; lp1++)
     {
       wk1 = current_file.readByte();
@@ -1295,7 +1299,7 @@ void mon_wdata(void){
   unsigned int f_length = f_length1 + f_length2 * 256;
       _DEBUG("wl %u\n", f_length);
 
-  // Open file for writing (append to existing file from mon_whead)
+  // Continue writing to the file mon_whead() left open
   if (stillOpen) {
     // Sending status code (OK)
     sndbyte(0x00);
@@ -1374,7 +1378,8 @@ void mon_lhead(void){
 
     sndbyte(0x00);  // Final OK
     _DEBUG("ok\n");
-      // Don't close file yet - mon_ldata will continue reading from it
+      // The file is left open here, but mon_ldata() does not read on from
+      // this handle: it re-opens the path and seeks to m_lop each time.
     }
     else {
       // Send status code (ERROR)
@@ -1521,7 +1526,7 @@ void mzcmd_commandwait()
       f_load();
       // f_testload();
       break;
-      // Rename and copy the specified file as 0000.mzf
+      // Copy the specified file over 0000.mzf
     case ASTART:
       println("ASTART START");
       // Sending status code (OK)
@@ -1614,7 +1619,6 @@ void mzcmd_commandwait()
       println("FILE INFO START");
       // Sending status code (OK)
       sndbyte(0x00);
-      // Implement file info logic here
       {
         int index = recbyte();
         sendFileName(index); // send filename for the given index
@@ -1624,7 +1628,6 @@ void mzcmd_commandwait()
       println("FILE LOAD START");
       // Sending status code (OK)
       sndbyte(0x00);
-      // Implement file load logic here
       {
         int index = recbyte();
         sendFileData(index); // load file for the given index

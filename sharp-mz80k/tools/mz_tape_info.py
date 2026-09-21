@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Copyright (c) Andrew Hague (Commander Coder), 21 September 2026
+#
+# This code may not be reused, in whole or in part, without attribution
+# to the author, Andrew Hague (Commander Coder).
+
 """
 Scan a folder, report the file types found, and decode the tape header of
 any Sharp MZ-80K / MZ-80A / MZ-700 tape image files (.MZT / .MZF).
@@ -50,7 +55,7 @@ ATTRIBUTE_NAMES = {
 }
 
 
-# Replacements which will have been applied for filehandling in FD_rom1.s. 
+# Replacements which will have been applied for filehandling in FD_rom.s.
 # These are the bytes which will be searched for in the object code, and if found, 
 # it indicates that the patch has already been applied.
 REPLACEMENTS = [
@@ -61,8 +66,9 @@ REPLACEMENTS = [
     bytes([0xCD, 0x10, 0xF0]),
 ]
 
-# these are the hex codes which are calling tape file handling routines in the FD_rom1.s code. 
-# If these are found, it indicates that the patch has not been applied.
+# These are the calls to the monitor ROM's tape routines (0021H-002DH) that
+# filehandle_patch.py redirects into FD_rom.s. If these are found, it indicates
+# that the patch has not been applied.
 FILECALLS = [
     bytes([0xCD, 0x21, 0x00]), 
     bytes([0xCD, 0x24, 0x00]), 

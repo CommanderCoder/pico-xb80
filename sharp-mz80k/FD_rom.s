@@ -1,3 +1,8 @@
+; Copyright (c) Andrew Hague (Commander Coder), 21 September 2026
+;
+; This code may not be reused, in whole or in part, without attribution
+; to the author, Andrew Hague (Commander Coder).
+
 ; ============================================================================
 ; MZ80K Pico-XB80 FD ROM
 ; ============================================================================
@@ -126,7 +131,7 @@ SD_ASTART_IDX   EQU 0A7H    ; Copy file at index over 0000.mzf
 ;   0xF007: JP ENT2 (PDATA - Save data, uses 0x92)
 ;   0xF00A: JP ENT3 (LHEAD - Load header, uses 0x93)
 ;   0xF00D: JP ENT4 (LDATA - Load data, uses 0x94)
-;   0xF010: JP ENT5 (CHECK - Verify, uses 0x95)
+;   0xF010: JP ENT5 (CHECK - Verify, stub: no PICO traffic)
 ; ============================================================================
         ORG 0F000H
 
@@ -143,7 +148,7 @@ ENT5:   JP  MVRFY               ; CHECK entry - Verify/Check
 ; MSHED - Write file header to SD card
 ; ============================================================================
 ; Inputs:  FNAME = filename, IBUFE = 128-byte header
-; Protocol: Command 0x91 + 128-byte header + receive checksum
+; Protocol: Command 0x91 + 128-byte header + receive status
 ; ============================================================================
 MSHED:
         DI                      ; Disable interrupts during I/O
@@ -172,7 +177,7 @@ MSH3:
         DEC  B
         JR   NZ, MSH3
 
-        ; Receive checksum
+        ; Receive status
         CALL RCVBYTE
         AND  A
         JP   NZ, MERR
@@ -235,7 +240,7 @@ MSD1:
 
         ; NOTE: PICO's mon_wdata() sends no further byte after the data
         ; phase (unlike mon_ldata's load path, it has no final status/
-        ; checksum byte) - closes the file and returns. Do not wait for
+        ; status byte) - closes the file and returns. Do not wait for
         ; one here or this hangs forever after a successful save.
         JP   MRET
 
@@ -243,7 +248,7 @@ MSD1:
 ; MLHED - Read file header from SD card
 ; ============================================================================
 ; Inputs:  BASIC workspace at 458EH/458FH (filename and flag)
-; Protocol: Command 0x93 + filename + receive 128-byte header + checksum
+; Protocol: Command 0x93 + filename + receive 128-byte header + status
 ; ============================================================================
 MLHED:
         DI
@@ -321,7 +326,7 @@ MLH5:
         DEC  B
         JR   NZ, MLH5
 
-        ; Receive checksum
+        ; Receive status
         CALL RCVBYTE
         AND  A
         JP   NZ, MERR
@@ -343,7 +348,7 @@ MLHNONAME:
 ; MLDAT - Read file data from SD card
 ; ============================================================================
 ; Inputs:  SADRS = destination address, FSIZE = byte count
-; Protocol: Command 0x94 + 2-byte size + receive data bytes + checksum
+; Protocol: Command 0x94 + 2-byte size + receive data bytes + status
 ; ============================================================================
 MLDAT:
         DI
@@ -378,7 +383,7 @@ MLDAT:
         ; Receive all file data bytes (uses DBRCV)
         CALL DBRCV
 
-        ; Receive checksum
+        ; Receive status
         CALL RCVBYTE
         AND  A
         JP   NZ, MERR

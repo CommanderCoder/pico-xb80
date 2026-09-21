@@ -1,3 +1,8 @@
+// Copyright (c) Andrew Hague (Commander Coder), 21 September 2026
+//
+// This code may not be reused, in whole or in part, without attribution
+// to the author, Andrew Hague (Commander Coder).
+
 #include "sd_card.h"
 
 #include <cstdio>
@@ -218,7 +223,7 @@ bool read_data_block_1bit(uint clk_gpio, uint cmd_gpio, uint dat0_gpio, uint32_t
     // Data-to-Command Turnaround 
     // Minimum wait: You must provide at least 8 clock cycles (1 byte worth of clocks) after the End Bit before initiating the next command
 
-    // Clock out 8 extra cycles so the card fully processes the command.
+    // Clock out 16 extra cycles so the card fully processes the command.
     for (int i = 0; i < 16; ++i) {
         clock_high(clk_gpio, kClockHalfPeriodUsInit);
         clock_low(clk_gpio, kClockHalfPeriodUsInit);
@@ -313,7 +318,7 @@ bool write_data_block_1bit(uint clk_gpio,
     // }
     // sleep_ms(1);
 
-    // 4) Read 5-bit data response token from DAT0 :
+    // 4) Read the 8-bit data response token from DAT0 (status is its 3-bit sss field):
     // read the data response token from the card
     // The card will respond with a 3-bit token indicating the result of the write operation:
     // 0b010: Data accepted
