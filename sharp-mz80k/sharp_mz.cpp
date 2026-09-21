@@ -648,12 +648,6 @@ static void astart_core(const char *src)
   char w_name[50];
   addrootdir(w_name, "0000.mzf", sizeof(w_name)); // prepend root directory to filename
 
-  // Get the IBF filename and find the file it names
-  char i_name[40];
-  recv_name(i_name, sizeof(i_name));
-
-  // Error if the file does not exist
-  if (resolve_name(i_name, m_name_copy, sizeof(m_name_copy), false))
   {
     // If 0000.mzf exists, delete it
     FILINFO fno;
@@ -711,17 +705,9 @@ static void astart_core(const char *src)
       sdinit();
     }
   }
-  else
-  {
-    // Send status code (ERROR)
-    sndbyte(0xF1);
-    sdinit();
-  }
 }
 
-
-
-// Missing wrapper called by mzcmd_commandwait()
+// ASTART by IBF name
 void astart(void)
 {
   char i_name[40];
@@ -730,6 +716,21 @@ void astart(void)
 
   char path[300];
   if (resolve_name(i_name, path, sizeof(path), false))
+  {
+    astart_core(path);
+  }
+  else
+  {
+    sndbyte(0xF1);
+    sdinit();
+  }
+}
+
+// ASTART by listing index
+void astart_idx(void)
+{
+  char path[300];
+  if (recv_source_index(path, sizeof(path)))
   {
     astart_core(path);
   }
@@ -1613,6 +1614,33 @@ void mzcmd_commandwait()
         int index = recbyte();
         sendFileData(index); // load file for the given index
       }
+      break;
+      // Index-based versions of the file operations. Same exchange as the
+      // name-based commands once the index has been received.
+    case FILEDEL_IDX:
+      println("FILE Delete (index) START");
+      sndbyte(0x00);
+      f_del_idx();
+      break;
+    case FILEREN_IDX:
+      println("FILE Rename (index) START");
+      sndbyte(0x00);
+      f_ren_idx();
+      break;
+    case FILEDUMP_IDX:
+      println("FILE Dump (index) START");
+      sndbyte(0x00);
+      f_dump_idx();
+      break;
+    case FILECOPY_IDX:
+      println("FILE Copy (index) START");
+      sndbyte(0x00);
+      f_copy_idx();
+      break;
+    case ASTART_IDX:
+      println("ASTART (index) START");
+      sndbyte(0x00);
+      astart_idx();
       break;
     default:
       _DEBUG("unrecognised 0x%02X\n",cmd);

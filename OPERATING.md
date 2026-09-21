@@ -46,9 +46,9 @@ Press ENTER or SHIFT+BREAK at the `FILTER LETTER?` prompt to clear the filter an
 
 > T
 
-Toggle between showing Basic and Machine code file types.  Each press cycles `ALL` → `BASIC` → `M-CODE` → `ALL`, and the current setting is shown on the status line at the top of the screen.
+Toggle between showing Basic, Machine code and other file types.  Each press cycles `ALL` → `BASIC` → `M-CODE` → `OTHER` → `ALL`, and the current setting is shown on the status line at the top of the screen.
 
-A file counts as machine code when its MZF header type byte is 01H, and as Basic for the other type codes.
+A file counts as machine code when its MZF header type byte is 01H, as Basic when it is 02H, and as other for any other value.
 
 > A
 

@@ -74,7 +74,7 @@ CURSOR_POS      EQU 0CB21H  ; Cursor row within current page (0-15)
 CACHED_PAGE     EQU 0CB23H  ; Which page number is currently cached
 CACHED_COUNT    EQU 0CB24H  ; How many files are on the cached page
 FILTER_CHR      EQU 0CB25H  ; Letter filter, 0 = show every name
-TYPE_MODE       EQU 0CB26H  ; 0 = all types, 1 = BASIC only, 2 = machine code only
+TYPE_MODE       EQU 0CB26H  ; 0 = all, 1 = BASIC, 2 = machine code, 3 = other
 FILE_ATTR       EQU 0CB27H  ; MZF type byte of the last entry fetched
 RUN_FLAG        EQU 0CB28H  ; 1 = execute after loading, 0 = load only
 DUMP_ADR        EQU 0CB29H  ; Working address for the P (print) display
@@ -98,7 +98,8 @@ KEY_BREAK       EQU 64H     ; SHIFT+BREAK
 KEY_CR          EQU 66H     ; ENTER
 
 ; MZF header type byte (header offset 0)
-ATTR_MCODE      EQU 01H     ; Machine code; 02H-05H are the BASIC variants
+ATTR_MCODE      EQU 01H     ; Machine code
+ATTR_BASIC      EQU 02H     ; BASIC program; any other value is "other"
 
 ; SD Card Commands (values sent to PICO - see xb_interface/xb_if.h)
 SD_SAVE         EQU 080H    ; Save by filename
@@ -1034,12 +1035,12 @@ SF_DONE:
         RET
 
 ; ============================================================================
-; TOGGLE_TYPE - 'T' cycles ALL -> BASIC -> M-CODE -> ALL
+; TOGGLE_TYPE - 'T' cycles ALL -> BASIC -> M-CODE -> OTHER -> ALL
 ; ============================================================================
 TOGGLE_TYPE:
         LD   A, (TYPE_MODE)
         INC  A
-        CP   03H
+        CP   04H
         JR   C, TT1
         XOR  A
 TT1:
@@ -1142,13 +1143,18 @@ ENTRY_MATCH:
         LD   A, (TYPE_MODE)
         OR   A
         JR   Z, EM_NAME         ; 0 = show every type
-        LD   B, A               ; B = 1 (BASIC) or 2 (machine code)
+        LD   B, A               ; B = 1 BASIC, 2 machine code, 3 other
         LD   A, (FILE_ATTR)
         OR   A
         JR   Z, EM_NAME         ; Type unreadable - always show
         CP   ATTR_MCODE
         JR   Z, EM_MC
-        LD   A, 01H             ; Anything that is not 01H counts as BASIC
+        CP   ATTR_BASIC
+        JR   Z, EM_BAS
+        LD   A, 03H             ; Neither 01H nor 02H counts as OTHER
+        JR   EM_CMP
+EM_BAS:
+        LD   A, 01H
         JR   EM_CMP
 EM_MC:
         LD   A, 02H
@@ -1420,7 +1426,12 @@ DS1:
         LD   DE, MSG_TBAS
         JR   DS3
 DS2:
+        CP   02H
+        JR   NZ, DS2A
         LD   DE, MSG_TMC
+        JR   DS3
+DS2A:
+        LD   DE, MSG_TOTH
 DS3:
         CALL MON_MESSAGE
         LD   DE, MSG_FIND
@@ -2078,6 +2089,8 @@ MSG_TBAS:
         DB 'BASIC  ', 0DH
 MSG_TMC:
         DB 'M-CODE ', 0DH
+MSG_TOTH:
+        DB 'OTHER  ', 0DH
 MSG_FIND:
         DB ' FIND:', 0DH
 MSG_FNONE:

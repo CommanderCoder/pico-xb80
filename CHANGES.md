@@ -77,7 +77,7 @@ Previously only `W`, `S`, `A`, `D`, `R`, `/` and BREAK did anything. Now:
 | `L` | Load without running | added |
 | `H` | Help page | added |
 | `F` | Filter by next letter typed | replaces the old `/` line-input search |
-| `T` | Cycle ALL → BASIC → M-CODE | added |
+| `T` | Cycle ALL → BASIC → M-CODE → OTHER | added |
 | `A` | Copy to `0000.mzf` (SD `0x82`) | added |
 | `C` | Copy file (SD `0x87`) | added |
 | `R` | Rename file (SD `0x85`) | added, was "run" |
