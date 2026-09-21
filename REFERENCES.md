@@ -7,3 +7,5 @@
  - `sjasmplus`
    - [Documentation](https://z00m128.github.io/sjasmplus/documentation.html)
    - [Installation](https://github.com/z00m128/sjasmplus/blob/master/INSTALL.md)
+ - [Yanataka MZ80K-SD](https://github.com/yanataka60/MZ80K_SD)
+ - [CMoulang Atom-DVI](https://github.com/cmoulang/Atom-DVI)
