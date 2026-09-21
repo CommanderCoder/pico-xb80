@@ -238,6 +238,21 @@ menu loads by index, not by name.
 fixed its "previous page" branch — it reopened the directory and reset to page 1, so
 paging back always jumped to the start.
 
+#### `LOAD "CURS"` looped on the header step — fixed
+
+Step 3 found the right file, but BASIC does its own check after `LHEAD` returns: at
+`2A83H` it compares the name in the header buffer (`10F1H`) byte-for-byte with the name
+typed, and on any difference jumps back to `CALL F00AH` — the tape "skip to the next
+file" loop. With `CURSED CHAMBERS` in the header and `CURS` requested, the `E` where
+BASIC expects the CR terminator failed the compare every time, so the header was
+fetched again forever. The full name worked because the compare passed.
+
+`mon_lhead` now writes the requested name into bytes 1–17 of the header it returns
+(CR padded, as saved headers are) whenever a name was given. This also covers a match
+by SD filename and a `NAME<n` tag, both of which differ from the header name in the
+same way. The file on the card is untouched; a monitor `L` with no name gets the
+header as stored.
+
 ### Rename and copy update the header
 
 Since the listing shows IBF names, renaming or copying a file now writes the new name

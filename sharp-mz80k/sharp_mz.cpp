@@ -1349,12 +1349,27 @@ void mon_lhead(void){
       sndbyte(0x00);  // Another OK
     _DEBUG("ok\n");
       
-      // Read and send 128 bytes of header
+      // Read the 128-byte header
+      uint8_t header[128];
       for (unsigned int lp1 = 0; lp1 < 128; lp1++){
-        uint8_t i_data = current_file.readByte();
-      // _DEBUG("%02x ",i_data);
-        sndbyte(i_data);
+        header[lp1] = current_file.readByte();
+      }
 
+      // BASIC checks the name in the returned header against the one it
+      // asked for and, on any difference, calls LHEAD again - the tape
+      // "skip to the next file" loop. So a name that only matched as an
+      // abbreviation, by SD filename, or with a <n tag would never load.
+      // Put the requested name into the header so that check passes.
+      if (m_name[0] != '\0') {
+        memset(header + 1, 0x0D, 17);
+        size_t n = strlen(m_name);
+        if (n > 16) n = 16;
+        memcpy(header + 1, m_name, n);
+      }
+
+      for (unsigned int lp1 = 0; lp1 < 128; lp1++){
+      // _DEBUG("%02x ",header[lp1]);
+        sndbyte(header[lp1]);
         }
 
     sndbyte(0x00);  // Final OK
