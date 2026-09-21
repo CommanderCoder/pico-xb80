@@ -401,6 +401,22 @@ static bool ibf_name_taken(const char *name, const char *except_path)
   return false;
 }
 
+// Receive a listing index from the Z80 and turn it into the file's SD path.
+// The index refers to the list built by the last FILECOUNT - the one the menu
+// is showing - so it picks exactly the row the user chose, even where several
+// files share an IBF name. Copies the path out because anything that rescans
+// (resolve_name, ibf_name_taken) will overwrite the list entries.
+static bool recv_source_index(char *path, size_t path_len)
+{
+  uint8_t index = recbyte();
+  if (index >= getFileCount())
+  {
+    return false;
+  }
+  addrootdir(path, getFileName(index), path_len);
+  return true;
+}
+
 // Overwrite the 17-byte IBF name field in an existing file's header so a
 // renamed or copied file lists under its new name.
 static bool write_ibf_name(const char *path, const char *name)
@@ -550,9 +566,9 @@ void f_send(const char* f_name_copy)
     {
       wk1 = current_file.readByte();
 
-      uint8_t char_repr = (wk1 >= 32 && wk1 <= 126) ? wk1 : '.'; // printable ASCII or dot
+      // uint8_t char_repr = (wk1 >= 32 && wk1 <= 126) ? wk1 : '.'; // printable ASCII or dot
 
-       _DEBUG("%c ",char_repr);
+      //  _DEBUG("%c ",char_repr);
       sndbyte(wk1);
     }
     
@@ -625,8 +641,9 @@ void f_load(void)
   }
 }
 
-// ASTART Copies the specified file as filename "0000.mzf"
-void astart(void)
+// ASTART - copy the located file over "0000.mzf". Sends a single status byte
+// once the copy is done (or has failed).
+static void astart_core(const char *src)
 {
   char w_name[50];
   addrootdir(w_name, "0000.mzf", sizeof(w_name)); // prepend root directory to filename
@@ -646,7 +663,7 @@ void astart(void)
     }
     
     // Open source file for reading
-    if (current_file.open(m_name_copy, FILE_READ) >= 0)
+    if (current_file.open(src, FILE_READ) >= 0)
     {
       // Get file size
       FSIZE_t f_length = current_file.size();
@@ -658,7 +675,7 @@ void astart(void)
       if (current_file_for_copy.open(w_name, FILE_WRITE) >= 0)
       {
         // Reopen source file for reading
-        current_file.open(m_name_copy, FILE_READ);
+        current_file.open(src, FILE_READ);
         
         // Copy data
         long lp1 = 0;
@@ -703,6 +720,25 @@ void astart(void)
 }
 
 
+
+// Missing wrapper called by mzcmd_commandwait()
+void astart(void)
+{
+  char i_name[40];
+  recv_name(i_name, sizeof(i_name));
+  _DEBUG("astart: %s\n", i_name);
+
+  char path[300];
+  if (resolve_name(i_name, path, sizeof(path), false))
+  {
+    astart_core(path);
+  }
+  else
+  {
+    sndbyte(0xF1);
+    sdinit();
+  }
+}
 
 void sendFileName(const uint8_t index)
 {
@@ -809,40 +845,20 @@ void dirlist(void)
 }
 
 
-  // FILE DELETE
-void f_del(void)
-  {
-    // Get the IBF filename and find the file it names
-  char i_name[40];
-  recv_name(i_name, sizeof(i_name));
-  char f_name[300];
+// FILE DELETE - everything after the file has been located.
+// Protocol: status 0, confirm byte in (0 = go ahead), result.
+static void del_core(const char *path)
+{
+  // Sending status code (OK)
+  sndbyte(0x00);
 
-    // Error if the file does not exist
-    if (resolve_name(i_name, f_name, sizeof(f_name), false))
+  // Receive processing selection (0: Continue DELETE, Non-zero: CANCEL)
+  if (recbyte() == 0x00)
+  {
+    if (g_fatfs->remove(path) == FR_OK)
     {
       // Sending status code (OK)
       sndbyte(0x00);
-
-      // Receive processing selection (0: Continue DELETE, Non-zero: CANCEL)
-      if (recbyte() == 0x00)
-      {
-        if (g_fatfs->remove(f_name) == FR_OK)
-        {
-          // Sending status code (OK)
-          sndbyte(0x00);
-        }
-        else
-        {
-          // Send status code (Error)
-          sndbyte(0xF1);
-          sdinit();
-        }
-      }
-      else
-      {
-        // Send status code (Cancel)
-        sndbyte(0x01);
-      }
     }
     else
     {
@@ -851,72 +867,122 @@ void f_del(void)
       sdinit();
     }
   }
+  else
+  {
+    // Send status code (Cancel)
+    sndbyte(0x01);
+  }
+}
 
-// FILERENAME
-void f_ren(void)
+// FILE DELETE by IBF name
+void f_del(void)
 {
-  // Get the current IBF filename and find the file it names
   char i_name[40];
   recv_name(i_name, sizeof(i_name));
-  char f_name[300];
+  char path[300];
 
-  // Error if the file does not exist
-  if (resolve_name(i_name, f_name, sizeof(f_name), false))
+  if (resolve_name(i_name, path, sizeof(path), false))
   {
-    // Sending status code (OK)
-    sndbyte(0x00);
-
-    // Get new filename
-    char n_name[40];
-    recv_name(n_name, sizeof(n_name));
-
-    // Sending status code (OK)
-    sndbyte(0x00);
-
-    // Fail if the new name is already in use as an IBF name
-    char new_name[300];
-    make_mzf_path(new_name, sizeof(new_name), n_name);
-
-    if (ibf_name_taken(n_name, f_name))
-    {
-      _DEBUG("%s already exists\n", n_name);
-      sndbyte(0xFF);
-      return;
-    }
-
-    // Rename the file, then put the new name inside the header too so the
-    // listing (which shows IBF names) reflects the change.
-    if (f_rename(f_name, new_name) == FR_OK && write_ibf_name(new_name, n_name))
-    {
-      // Sending status code (OK)
-      sndbyte(0x00);
-    }
-    else
-    {
-      // Sending status code (Error)
-      sndbyte(0xFF);
-    }
+    del_core(path);
   }
   else
   {
-    // Send status code (Error)
     sndbyte(0xF1);
     sdinit();
   }
 }
 
-        // FILE DUMP
-void f_dump(void)
+// FILE DELETE by listing index
+void f_del_idx(void)
 {
-  // Get the IBF filename and find the file it names
+  char path[300];
+  if (recv_source_index(path, sizeof(path)))
+  {
+    del_core(path);
+  }
+  else
+  {
+    sndbyte(0xF1);
+  }
+}
+
+// FILERENAME - everything after the file has been located.
+// Protocol: status 0, new name in, status 0, result.
+static void ren_core(const char *path)
+{
+  // Sending status code (OK)
+  sndbyte(0x00);
+
+  // Get new filename
+  char n_name[40];
+  recv_name(n_name, sizeof(n_name));
+
+  // Sending status code (OK)
+  sndbyte(0x00);
+
+  // Fail if the new name is already in use as an IBF name
+  char new_path[300];
+  make_mzf_path(new_path, sizeof(new_path), n_name);
+
+  if (ibf_name_taken(n_name, path))
+  {
+    _DEBUG("%s already exists\n", n_name);
+    sndbyte(0xFF);
+    return;
+  }
+
+  // Rename the file, then put the new name inside the header too so the
+  // listing (which shows IBF names) reflects the change.
+  if (f_rename(path, new_path) == FR_OK && write_ibf_name(new_path, n_name))
+  {
+    // Sending status code (OK)
+    sndbyte(0x00);
+  }
+  else
+  {
+    // Sending status code (Error)
+    sndbyte(0xFF);
+  }
+}
+
+// FILERENAME by IBF name
+void f_ren(void)
+{
   char i_name[40];
   recv_name(i_name, sizeof(i_name));
-  char f_name[300];
+  char path[300];
 
-  _DEBUG("fname %s\n", i_name);
+  if (resolve_name(i_name, path, sizeof(path), false))
+  {
+    ren_core(path);
+  }
+  else
+  {
+    sndbyte(0xF1);
+    sdinit();
+  }
+}
 
-  // Error if the file does not exist
-  if (resolve_name(i_name, f_name, sizeof(f_name), false))
+// FILERENAME by listing index
+void f_ren_idx(void)
+{
+  char path[300];
+  if (recv_source_index(path, sizeof(path)))
+  {
+    ren_core(path);
+  }
+  else
+  {
+    sndbyte(0xF1);
+  }
+}
+
+        // FILE DUMP
+// FILE DUMP - everything after the file has been located.
+// Protocol: status 0, then blocks of {offset lo, offset hi, 128 bytes, key
+// byte in}, ending with offset FFFF and a final status.
+static void dump_core(const char *f_name)
+{
   {
     // Sending status code (OK)
     sndbyte(0x00);
@@ -989,7 +1055,7 @@ void f_dump(void)
       }
       
       current_file.close();
-      
+
       // Sending status code (OK)
       sndbyte(0x00);
     }
@@ -1000,26 +1066,46 @@ void f_dump(void)
       sdinit();
     }
   }
+}
+
+// FILE DUMP by IBF name
+void f_dump(void)
+{
+  char i_name[40];
+  recv_name(i_name, sizeof(i_name));
+  char path[300];
+
+  _DEBUG("fname %s\n", i_name);
+
+  if (resolve_name(i_name, path, sizeof(path), false))
+  {
+    dump_core(path);
+  }
   else
   {
-    // Send status code (Error)
     sndbyte(0xF1);
     sdinit();
   }
 }
 
-// FILE COPY
-void f_copy(void)
+// FILE DUMP by listing index
+void f_dump_idx(void)
 {
-  // Get the current IBF filename and find the file it names
-  char i_name[40];
-  recv_name(i_name, sizeof(i_name));
-  char f_name[300];
+  char path[300];
+  if (recv_source_index(path, sizeof(path)))
+  {
+    dump_core(path);
+  }
+  else
+  {
+    sndbyte(0xF1);
+  }
+}
 
-  _DEBUG("copy %s\n", i_name);
-
-  // Error if the file does not exist
-  if (resolve_name(i_name, f_name, sizeof(f_name), false))
+// FILE COPY - everything after the source file has been located.
+// Protocol: status 0, new name in, status (F1 if that name is taken), result.
+static void copy_core(const char *f_name)
+{
   {
     // Sending status code (OK)
     sndbyte(0x00);
@@ -1108,11 +1194,39 @@ void f_copy(void)
       sdinit();
     }
   }
+}
+
+// FILE COPY by IBF name
+void f_copy(void)
+{
+  char i_name[40];
+  recv_name(i_name, sizeof(i_name));
+  char path[300];
+
+  _DEBUG("copy %s\n", i_name);
+
+  if (resolve_name(i_name, path, sizeof(path), false))
+  {
+    copy_core(path);
+  }
   else
   {
-    // Send status code (Error - source not found)
     sndbyte(0xF1);
     sdinit();
+  }
+}
+
+// FILE COPY by listing index
+void f_copy_idx(void)
+{
+  char path[300];
+  if (recv_source_index(path, sizeof(path)))
+  {
+    copy_core(path);
+  }
+  else
+  {
+    sndbyte(0xF1);
   }
 }
 
@@ -1237,7 +1351,7 @@ void mon_lhead(void){
       // Read and send 128 bytes of header
       for (unsigned int lp1 = 0; lp1 < 128; lp1++){
         uint8_t i_data = current_file.readByte();
-      _DEBUG("%02x ",i_data);
+      // _DEBUG("%02x ",i_data);
         sndbyte(i_data);
 
         }

@@ -103,14 +103,16 @@ ATTR_MCODE      EQU 01H     ; Machine code; 02H-05H are the BASIC variants
 ; SD Card Commands (values sent to PICO - see xb_interface/xb_if.h)
 SD_SAVE         EQU 080H    ; Save by filename
 SD_LOADNAME     EQU 081H    ; Load by filename
-SD_ASTART       EQU 082H    ; Copy a file over 0000.mzf
-SD_DEL          EQU 084H    ; Delete
-SD_REN          EQU 085H    ; Rename
-SD_DUMP         EQU 086H    ; Dump file contents
-SD_COPY         EQU 087H    ; Copy
+; The menu works by listing index, never by name: names are not unique on the
+; card, and an index always means exactly the row the user is looking at.
 SD_FILECOUNT    EQU 0A0H    ; Query total file count
 SD_DIRLIST      EQU 0A1H    ; Get type + name at index
 SD_LOADIDX      EQU 0A2H    ; Load file at index
+SD_DEL_IDX      EQU 0A3H    ; Delete file at index
+SD_REN_IDX      EQU 0A4H    ; Rename file at index
+SD_DUMP_IDX     EQU 0A5H    ; Dump file at index
+SD_COPY_IDX     EQU 0A6H    ; Copy file at index
+SD_ASTART_IDX   EQU 0A7H    ; Copy file at index over 0000.mzf
 
 ; ============================================================================
 ; ROM Start (0xF000) - TAPE LOADER BYPASS with File I/O Handlers
@@ -1556,27 +1558,47 @@ SH2:
         RET
 
 ; ============================================================================
-; GET_SELECTED - Fetch the highlighted entry's full name from PICO
+; SEL_INDEX - PICO file index of the highlighted row
 ; ============================================================================
-; Outputs: WORKING_STORE = CR-terminated name, CY set if nothing is selected.
-; The cached name is truncated to 15 characters for display, so the real
-; name is re-fetched here before being sent back for a file operation.
+; Outputs: A = index, CY set if nothing is selected.
+; File operations send this index rather than the row's name, so they act on
+; exactly the row picked even when several files share a name.
 ; ============================================================================
-GET_SELECTED:
+SEL_INDEX:
         LD   A, (CACHED_COUNT)
         OR   A
-        JR   Z, GS_NONE
+        JR   Z, SI_NONE
         LD   A, (CURSOR_POS)
         LD   L, A
         LD   H, 0
         LD   DE, INDEX_BUFFER
         ADD  HL, DE
         LD   A, (HL)            ; PICO file index
-        CALL GET_FILE_AT_INDEX
-        AND  A                  ; Clear carry - selection is valid
+        OR   A                  ; Clear carry (ADD HL,DE may have set it)
         RET
-GS_NONE:
+SI_NONE:
         SCF
+        RET
+
+; ============================================================================
+; SEND_INDEX_CMD - Open an index-based operation on the highlighted row
+; ============================================================================
+; Inputs:  A = command byte
+; Outputs: A = PICO status for the index (0 = located), CY set if there was
+;          no selection to begin with. Sends command, dispatch ack, index.
+; ============================================================================
+SEND_INDEX_CMD:
+        LD   C, A               ; C = command
+        CALL SEL_INDEX
+        RET  C                  ; Nothing selected
+        LD   B, A               ; B = index
+        LD   A, C
+        CALL MCMD               ; Send command, receive dispatch ack
+        AND  A
+        RET  NZ                 ; Dispatch failed - report that status
+        LD   A, B
+        CALL MCMD               ; Send index, receive per-index status
+        AND  A                  ; Z if located; carry clear either way
         RET
 
 ; ============================================================================
@@ -1668,19 +1690,12 @@ LS_NORUN:
 ; ============================================================================
 ; DO_ASTART - 'A' copies the highlighted file over 0000.mzf
 ; ============================================================================
-; Protocol: 0x82, ack, 33-byte name, status.
+; Protocol: 0xA7, ack, index, status (sent once the copy has finished).
 ; ============================================================================
 DO_ASTART:
-        CALL GET_SELECTED
-        RET  C
-        LD   A, SD_ASTART
-        CALL MCMD
-        AND  A
-        JP   NZ, MENU_ERR
-        LD   HL, WORKING_STORE
-        CALL SNDNAME
-        CALL RCVBYTE
-        AND  A
+        LD   A, SD_ASTART_IDX
+        CALL SEND_INDEX_CMD
+        RET  C                  ; Nothing selected
         JP   NZ, MENU_ERR
         LD   DE, MSG_ASOK
         JP   MENU_MSG
@@ -1688,20 +1703,13 @@ DO_ASTART:
 ; ============================================================================
 ; DO_DELETE - 'D' deletes the highlighted file after confirmation
 ; ============================================================================
-; Protocol: 0x84, ack, 33-byte name, status, confirm byte (0 = go ahead),
+; Protocol: 0xA3, ack, index, status, confirm byte (0 = go ahead),
 ;           result (0 = deleted, 1 = cancelled).
 ; ============================================================================
 DO_DELETE:
-        CALL GET_SELECTED
-        RET  C
-        LD   A, SD_DEL
-        CALL MCMD
-        AND  A
-        JP   NZ, MENU_ERR
-        LD   HL, WORKING_STORE
-        CALL SNDNAME
-        CALL RCVBYTE
-        AND  A
+        LD   A, SD_DEL_IDX
+        CALL SEND_INDEX_CMD
+        RET  C                  ; Nothing selected
         JP   NZ, MENU_ERR
 
         LD   H, MSG_ROW
@@ -1734,25 +1742,20 @@ DD_NOTOK:
 ; ============================================================================
 ; DO_RENAME - 'R' renames the highlighted file
 ; ============================================================================
-; Protocol: 0x85, ack, old name, status, new name, ack, result.
+; Protocol: 0xA4, ack, index, status, new name, ack, result.
 ; ============================================================================
 DO_RENAME:
-        CALL GET_SELECTED
-        RET  C
+        CALL SEL_INDEX
+        RET  C                  ; Nothing selected - don't prompt
         ; Ask for the new name first: a cancelled prompt must not leave the
         ; PICO waiting part way through the exchange.
         LD   DE, MSG_NEWNAME
         CALL ASK_NAME
         JR   C, DR_ABORT
 
-        LD   A, SD_REN
-        CALL MCMD
-        AND  A
-        JP   NZ, MENU_ERR
-        LD   HL, WORKING_STORE
-        CALL SNDNAME            ; Existing name
-        CALL RCVBYTE
-        AND  A
+        LD   A, SD_REN_IDX
+        CALL SEND_INDEX_CMD
+        RET  C
         JP   NZ, MENU_ERR
         LD   HL, NAMEBUF
         CALL SNDNAME            ; New name
@@ -1770,24 +1773,19 @@ DR_ABORT:
 ; ============================================================================
 ; DO_COPY - 'C' copies the highlighted file to a new name
 ; ============================================================================
-; Protocol: 0x87, ack, source name, status, new name, status (0xF1 if the
-;           name is taken), copy result.
+; Protocol: 0xA6, ack, index, status, new name, status (0xF1 if the name is
+;           taken), copy result.
 ; ============================================================================
 DO_COPY:
-        CALL GET_SELECTED
-        RET  C
+        CALL SEL_INDEX
+        RET  C                  ; Nothing selected - don't prompt
         LD   DE, MSG_NEWNAME
         CALL ASK_NAME
         JR   C, DC_ABORT
 
-        LD   A, SD_COPY
-        CALL MCMD
-        AND  A
-        JP   NZ, MENU_ERR
-        LD   HL, WORKING_STORE
-        CALL SNDNAME            ; Source name
-        CALL RCVBYTE
-        AND  A
+        LD   A, SD_COPY_IDX
+        CALL SEND_INDEX_CMD
+        RET  C
         JP   NZ, MENU_ERR
         LD   HL, NAMEBUF
         CALL SNDNAME            ; Destination name
@@ -1807,22 +1805,15 @@ DC_ABORT:
 ; ============================================================================
 ; DO_PRINT - 'P' dumps the highlighted file, 128 bytes per screen
 ; ============================================================================
-; Protocol: 0x86, ack, 33-byte name, status, then repeating blocks of
+; Protocol: 0xA5, ack, index, status, then repeating blocks of
 ;           {offset low, offset high, 128 data bytes, key byte}. An offset
 ;           of FFFF ends the dump and is followed by a final status byte.
 ;           Key byte: 0xFF break, 0x42 back one block, anything else next.
 ; ============================================================================
 DO_PRINT:
-        CALL GET_SELECTED
-        RET  C
-        LD   A, SD_DUMP
-        CALL MCMD
-        AND  A
-        JP   NZ, MENU_ERR
-        LD   HL, WORKING_STORE
-        CALL SNDNAME
-        CALL RCVBYTE
-        AND  A
+        LD   A, SD_DUMP_IDX
+        CALL SEND_INDEX_CMD
+        RET  C                  ; Nothing selected
         JP   NZ, MENU_ERR
 
 DP_SCREEN:

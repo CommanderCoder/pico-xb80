@@ -15,7 +15,7 @@ of the Pico-side handlers that the documented menu operations depend on were
 addressing the wrong directory and could never have succeeded.
 
 Every monitor command and menu key documented in `OPERATING.md` is now implemented. The
-ROM grew from 1342 to 3240 bytes, leaving 849 bytes of the 4089-byte budget free.
+ROM grew from 1342 to 3181 bytes, leaving 908 bytes of the 4089-byte budget free.
 
 One documented behaviour is still missing: the guide says that pressing ENTER after
 `LOAD` without naming a file should bring up the File Menu. `MLHED` still reports
@@ -282,6 +282,41 @@ Because a tag depends on what else is on the card, it can move when files are ad
 removed. `OPERATING.md` says so and points at `R` for giving a file a permanent name of
 its own.
 
+### Menu file operations act by index, not by name
+
+Even with tags, sending a *name* back to the Pico for delete, rename, copy, print and
+autoboot left a window where the Pico's rescan could number the duplicates differently
+from the listing the user was looking at. The ROM already records each row's Pico file
+index in `INDEX_BUFFER` for loading, so those five operations now send that index too.
+
+Five index-based commands were added alongside the existing `0xA0`–`0xA2` family:
+
+| Command | Code | Replaces |
+| --- | --- | --- |
+| `FILEDEL_IDX` | `0xA3` | `FILEDEL` `0x84` |
+| `FILEREN_IDX` | `0xA4` | `FILEREN` `0x85` |
+| `FILEDUMP_IDX` | `0xA5` | `FILEDUMP` `0x86` |
+| `FILECOPY_IDX` | `0xA6` | `FILECOPY` `0x87` |
+| `ASTART_IDX` | `0xA7` | `ASTART` `0x82` |
+
+Each has the same shape as `FILELOAD`: command, dispatch ack, index byte, status — and
+from the status onward the exchange is byte-for-byte identical to the name-based
+version. On the Pico each operation was split into a `*_core(path)` that does the work
+and two thin wrappers that only differ in how they find the path (`resolve_name()` for
+the name-based command, `recv_source_index()` for the index-based one). The name-based
+commands still exist, unchanged in behaviour, for anything that must address a file by
+name.
+
+In the ROM, `GET_SELECTED` (which re-fetched the row's name from the Pico) became
+`SEL_INDEX`, and a shared `SEND_INDEX_CMD` sends command + index and returns the
+status. Rename and copy still prompt for the new name *before* opening the exchange, so
+a cancelled prompt cannot leave the Pico waiting mid-protocol. The ROM shrank by 62
+bytes as a result of no longer shipping names back.
+
+`OPERATING.md` now says that menu operations act on the highlighted row, and that tags
+matter only for telling rows apart there — naming a file is only needed from BASIC or
+the command line.
+
 ### ROM name field widened
 
 The cached name field grew from 16 bytes (15 characters) to `NAME_FIELD` = 18 bytes
@@ -309,7 +344,7 @@ verbatim from the Z80.
 
 - `sjasmplus` assembles clean: 0 errors, 0 warnings.
 - Full Pico firmware links clean via `ninja`.
-- ROM is 3240 bytes against the 4089-byte limit asserted in `SharpMZ_initialise()`.
+- ROM is 3181 bytes against the 4089-byte limit asserted in `SharpMZ_initialise()`.
 - Entry point addresses checked byte-for-byte in the generated `FD_rom.h` against
   `filehandle_patch.py`.
 - Every ROM/Pico exchange was traced by hand against the handler in `sharp_mz.cpp` —

@@ -235,10 +235,6 @@ void establishFileList(const char* rootdir)
             memcpy(entry->rawname, fno.fname, n);
             entry->rawname[n] = '\0';
 
-            for (int i = 0; i < n; i++)
-                if ((unsigned char)entry->rawname[i] < 32 ||
-                    (unsigned char)entry->rawname[i] > 126)
-                    entry->rawname[i] = '.';
         }
 
         // Starts out identical - disambiguateNames() adds a tag below if this
@@ -259,7 +255,15 @@ void establishFileList(const char* rootdir)
   _DEBUG("FileCount: %d\n", FileCount);
   for (uint8_t i = 0; i < FileCount; i++)
   {
-    _DEBUG("File %d: %s\n", i, FileList[i].displayname);
+    char othername[IBF_NAME_MAX + 1];
+    memcpy(othername, FileList[i].rawname, sizeof(othername));
+    int n = strlen(othername);
+    for (int i = 0; i < n; i++)
+     if ((unsigned char)othername[i] < 32 ||
+        (unsigned char)othername[i] > 126)
+        othername[i] = '.';
+
+    _DEBUG("File %d: %s\n", i, othername);
   }
 }
 

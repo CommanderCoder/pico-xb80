@@ -105,11 +105,13 @@ BASIC SP-5025<1
 BASIC SP-5025<2
 ```
 
-The tag is added to the end of the name, or replaces the last few characters when the name is already too long to grow.  Use the tagged name to refer to one particular file.
+The tag is added to the end of the name, or replaces the last few characters when the name is already too long to grow.
+
+In the File Menu the tags are only there so you can tell the rows apart: every operation (`X`, `L`, `A`, `C`, `R`, `D`, `P`) acts on the highlighted row itself, never on its name, so it always affects exactly the file you are pointing at.
 
 > The tags exist only in the listing.  **The files on the card are not altered** and their headers still hold the original name, so a tag can move if you add or remove files.  Use `R` to give a file a name of its own if you want one that will not change.
 
-An untagged name still works from BASIC and from the command line, and finds the first file carrying that name.
+Where a file must be named — from BASIC or the command line — the tagged name picks out one particular file, and an untagged name finds the first file carrying it.
 
 ## Loading from BASIC and other programs patched for `Pico-XB80`
 

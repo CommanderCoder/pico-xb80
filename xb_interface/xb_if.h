@@ -219,9 +219,17 @@ extern void wait_z80_mailbox_empty();
 #define MONITOR_LDATA 0x94
 #define BOOTLOAD 0x95
 
+// Index-based commands. The index refers to the listing built by the last
+// FILECOUNT, which is what the menu on the Z80 is showing, so these always act
+// on exactly the row the user picked even when several files share a name.
 #define FILECOUNT 0xA0 // get file count
 #define FILEINFO 0xA1 // get file info by index
 #define FILELOAD 0xA2 // load using INDEX not filename
+#define FILEDEL_IDX 0xA3
+#define FILEREN_IDX 0xA4
+#define FILEDUMP_IDX 0xA5
+#define FILECOPY_IDX 0xA6
+#define ASTART_IDX 0xA7
 
 
 #ifdef __cplusplus
