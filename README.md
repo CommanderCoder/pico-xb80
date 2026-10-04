@@ -88,8 +88,8 @@ Only the right-hand column of pins is used from EXT1 and EXT2 on the Olimex boar
 | P29 | nc | |
 | P31 | B10 | NWR |
 | P33 | B8 | NRD |
-| P35 | B6 | NMREQ |
-| P37 | B4 | NIOREQ |
+| P35 | B6 | NIOREQ |
+| P37 | B4 | NMREQ |
 | P39 | B3 | GND |
 
   </div>

@@ -15,12 +15,19 @@ https://copilot.microsoft.com/shares/5pAqiwKpG3UoPwfFo242L
 // Data on GPIO [16..23]
 // Control on GPIO [28..31]
 // Address on GPIO [32..47]
-.define public PIN_D0 16         ; base of 8-bit data bus
-.define public PIN_NWR 28       ; active low write / GREY
-.define public PIN_NRD 29       ; active low read / WHITE
-.define public PIN_NMREQ 30     ; Active Low, Memory Request / BLACK
-.define public PIN_NIOREQ 31    ; Active Low, IO Request / BROWN
-.define public PIN_A0 32         ; base of 16-bit address bus
+.define public PIN_D0 16        ; base of 8-bit data bus
+.define public PIN_NWR 28       ; active low write
+.define public PIN_NRD 29       ; active low read
+.define public PIN_NIOREQ 30    ; Active Low, IO Request
+.define public PIN_NMREQ 31     ; Active Low, Memory Request
+.define public PIN_A0 32        ; base of 16-bit address bus
+
+// GPIO 16 = physical pin EXT1_3
+// GPIO 28 = physical pin EXT1_31
+// GPIO 29 = physical pin EXT1_33
+// GPIO 30 = physical pin EXT1_35
+// GPIO 31 = physical pin EXT1_37
+// GPIO 32 = physical pin EXT2_3
 
 .define ADDR_DELAY 12
 
