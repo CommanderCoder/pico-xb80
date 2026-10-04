@@ -2,6 +2,10 @@
 
 pico-xb80 is a small expansion-bus interface for 1970s and 1980s desktop machines, designed to allow a Raspberry Pi Pico 2 board to present an SD card-backed storage device to a Sharp MZ80K system.
 
+https://youtu.be/xSwXQkPeJl4?si=bnu4Bi942s_XvJiR
+
+[![Short Video of the pico-xb80](http://img.youtube.com/vi/xSwXQkPeJl4/0.jpg)](http://www.youtube.com/watch?v=xSwXQkPeJl4?si=bnu4Bi942s_XvJiR "pico-xb80 on Sharp MZ80K")
+
 ## Supported hardware
 
 Currently supported:
