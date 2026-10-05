@@ -41,19 +41,8 @@ char ROOT_DIR[12] = "/MZ_FD"; // Root directory for MZF files
 
 byte s_data[260];
 
-// SDCard slot pin assignments.
-//
-// These are not free choices: CLK/CMD/DAT0 land on the SCK/TX/RX pins of
-// spi1, which is what lets SdCard run the card over hardware SPI instead of
-// bit-banging it (see the comment at the top of sd_card.h). GPIO12 - the DAT0
-// pin on Revision A boards - is also an spi1 RX pin, so either revision can
-// use SPI.
-namespace {
-  constexpr uint kCsPin = 9;    // SD pin 1: CS in SPI mode, DAT3 in native mode
-  constexpr uint kClkPin = 10;  // SD pin 5: CLK            (spi1 SCK)
-  constexpr uint kCmdPin = 11;  // SD pin 2: CMD / DI       (spi1 TX)
-  constexpr uint kDat0Pin = 24; // SD pin 7: DAT0 / DO      (spi1 RX) - GPIO12 on Revision A boards
-}  // namespace
+// The SD slot pin assignments live in sd_card.h, because which of them apply
+// depends on the board revision - see SdCard::detect_board_revision().
 
 
 
@@ -74,17 +63,36 @@ bool InitSDFatFs() {
   // Allocate SD and FatFsInterface once and keep them alive for the
   // lifetime of the program so the FATFS object inside FatFsInterface
   // remains valid after this function returns.
-  SdCard* sd = nullptr;
+  SdBoardRevision revision = SdCard::detect_board_revision();
+  _DEBUG("SD: detected board %s\n", SdCard::board_revision_name(revision));
 
-  if (sd == nullptr) {
-    sd = new SdCard(kCmdPin, kClkPin, kDat0Pin, kCsPin);
-  }
+  SdCard* sd = new SdCard(revision);
 
   if (!sd->initialize()) {
-    _DEBUG("SD: initialization failed\n");
-    return false;
+    // The probe reads pull-ups rather than asking the card, so it can be
+    // fooled by something else wired to the spare DAT0 pin on the extension
+    // header. Rather than give up on one electrical reading, try the other
+    // revision's wiring before calling it a failure. Only Revision A -> B
+    // recovers cleanly: going the other way, the failed SPI attempt may have
+    // left the card latched in SPI mode until it is next powered down.
+    const SdBoardRevision other = (revision == SdBoardRevision::RevisionA)
+                                      ? SdBoardRevision::RevisionB
+                                      : SdBoardRevision::RevisionA;
+    _DEBUG("SD: %s wiring did not come up, trying %s\n",
+           SdCard::board_revision_name(revision), SdCard::board_revision_name(other));
+
+    delete sd;
+    sd = new SdCard(other);
+    if (!sd->initialize()) {
+      _DEBUG("SD: initialization failed\n");
+      delete sd;
+      sd = nullptr;
+      return false;
+    }
+    revision = other;
   }
-  _DEBUG("SD: initialization succeeded (%s mode)\n", sd->bus_mode_name());
+  _DEBUG("SD: initialization succeeded (%s, %s mode)\n",
+         SdCard::board_revision_name(revision), sd->bus_mode_name());
 
   if (g_fatfs == nullptr) {
     g_fatfs = new FatFsInterface(*sd);

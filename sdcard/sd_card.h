@@ -19,6 +19,32 @@ enum class SdBusMode : uint8_t {
     Spi,         // hardware SPI block (spi0/spi1), 8 bits per transfer
 };
 
+// Which Olimex RP2350-PICO2-XXL the firmware is running on. The two
+// revisions wire the card's DAT0/DO line to different GPIOs, and Revision A
+// cannot do SPI at all, so this decides both the pin and the transport.
+enum class SdBoardRevision : uint8_t {
+    RevisionA,  // DAT0 on GPIO12, 1-bit MMC mode only
+    RevisionB,  // D0 on GPIO24, SPI mode - also covers anything later
+    Unknown,    // the probe could not tell; treated as RevisionB
+};
+
+// Olimex RP2350-PICO2-XXL SD/MMC socket wiring. CLK and CMD sit on the same
+// GPIOs on every revision; only DAT0/DO moved, and only CS differs in whether
+// it is connected at all:
+//
+//   Revision A wires the card in 1-bit MMC mode. SD_DAT0 is GPIO12, and R24 -
+//   the 33R link between GPIO9 and the card's CD/DAT3/CS pin - is left
+//   unpopulated, so CS cannot be asserted and SPI is simply not available.
+//   (Fitting R24 enables it, which is what probe_spi is for.)
+//
+//   Revision B moved SD_DAT0 to GPIO24 because GPIO12 collides with the
+//   RP2350's HSTX/HDMI block, and ships configured for SPI mode.
+constexpr uint kSdClkGpio = 10;             // SD pin 5: CLK, via R25 (33R)
+constexpr uint kSdCmdGpio = 11;             // SD pin 2: CMD / DI
+constexpr uint kSdCsGpio = 9;               // SD pin 1: DAT3 / CS, via R24
+constexpr uint kSdDat0GpioRevisionA = 12;   // SD pin 7: DAT0 / DO, via R26 (200R)
+constexpr uint kSdDat0GpioRevisionB = 24;   // ditto, where Revision B put it
+
 // Two transports to the same card, chosen at initialize() time:
 //
 //   SPI (preferred when available) drives the card through one of the RP2350's
@@ -56,6 +82,18 @@ public:
     // regardless of wiring.
     SdCard(uint cmd_gpio, uint clk_gpio, uint dat0_gpio,
            uint cs_gpio = kSdNoPin, bool probe_spi = true);
+
+    // Wires itself for one of the known board revisions: GPIO12 and native
+    // 1-bit for Revision A, GPIO24 and SPI for Revision B. Pair it with
+    // detect_board_revision().
+    explicit SdCard(SdBoardRevision revision);
+
+    // Works out which board this is by looking for the 10k pull-up that the
+    // SD_DAT0 net carries on the board itself, so it needs no card inserted
+    // and sends the card no commands. See the implementation for why that
+    // matters.
+    static SdBoardRevision detect_board_revision();
+    static const char* board_revision_name(SdBoardRevision revision);
 
     bool initialize();
     bool read_sector(uint32_t lba, uint8_t* buffer, size_t size = 512);

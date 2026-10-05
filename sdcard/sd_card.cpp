@@ -540,7 +540,64 @@ bool spi_write_data_block(spi_inst_t* spi, const uint8_t* buffer, size_t size) {
     return true;
 }
 
+// Is something off-chip holding this pin up?
+//
+// Enable the RP2350's own pull-down and see who wins. The SD_DAT0 net carries
+// a 10k pull-up to 3V3 on the board (R21 on the Olimex schematic), which
+// against the internal pull-down's ~60k leaves the pin near 2.8V - a solid
+// high. A pin that is only a header pin has nothing on it and follows the
+// pull-down to 0. The pull-up is on the board rather than in the card, so
+// this reads the same with an empty socket.
+//
+// The pin's current function is put back afterwards: GPIO24 is inside the
+// 16..47 block that eb_gpio_init() hands to the PIO, and probing it should
+// not quietly take it away.
+bool gpio_sees_external_pullup(uint gpio) {
+    const gpio_function_t previous = gpio_get_function(gpio);
+
+    gpio_set_function(gpio, GPIO_FUNC_SIO);
+    gpio_set_dir(gpio, GPIO_IN);
+    gpio_pull_down(gpio);
+    sleep_us(200);  // settle through the net's RC
+    const bool high = gpio_get(gpio);
+
+    gpio_disable_pulls(gpio);
+    gpio_set_function(gpio, previous);
+    return high;
+}
+
 }  // namespace
+
+// Deliberately electrical rather than a protocol probe. Asking the card
+// instead would mean sending it CMD0, and a CMD0 seen with CS low latches a
+// card into SPI mode until the power is cycled - so a guess that went wrong
+// could not be taken back. Reading the pull-ups commits to nothing.
+SdBoardRevision SdCard::detect_board_revision() {
+    const bool dat0_on_revision_a_pin = gpio_sees_external_pullup(kSdDat0GpioRevisionA);
+    const bool dat0_on_revision_b_pin = gpio_sees_external_pullup(kSdDat0GpioRevisionB);
+
+    if (dat0_on_revision_b_pin && !dat0_on_revision_a_pin) {
+        return SdBoardRevision::RevisionB;
+    }
+    if (dat0_on_revision_a_pin && !dat0_on_revision_b_pin) {
+        return SdBoardRevision::RevisionA;
+    }
+
+    // Neither pin pulled up (no SD/MMC fitted at all?) or both did (something
+    // else wired to the spare pin on the extension header).
+    _ERROR_PRINT("SD: board revision undetermined (GPIO%u=%d GPIO%u=%d)\n",
+                 kSdDat0GpioRevisionA, dat0_on_revision_a_pin,
+                 kSdDat0GpioRevisionB, dat0_on_revision_b_pin);
+    return SdBoardRevision::Unknown;
+}
+
+const char* SdCard::board_revision_name(SdBoardRevision revision) {
+    switch (revision) {
+        case SdBoardRevision::RevisionA: return "Revision A";
+        case SdBoardRevision::RevisionB: return "Revision B";
+        default: return "unknown revision";
+    }
+}
 
 SdCard::SdCard(uint cmd_gpio, uint clk_gpio, uint dat0_gpio, uint cs_gpio, bool probe_spi)
     : cmd_gpio_(cmd_gpio),
@@ -552,6 +609,17 @@ SdCard::SdCard(uint cmd_gpio, uint clk_gpio, uint dat0_gpio, uint cs_gpio, bool 
       spi_(nullptr),
       rca_(0),
       high_capacity_(false) {}
+
+// Revision A has no CS connection (R24 unpopulated), so there is nothing for
+// the SPI probe to find and it is skipped outright. A Revision A board with
+// R24 fitted can still get SPI by naming the pins explicitly instead.
+// Unknown is treated as Revision B, which is what current boards are.
+SdCard::SdCard(SdBoardRevision revision)
+    : SdCard(kSdCmdGpio,
+             kSdClkGpio,
+             revision == SdBoardRevision::RevisionA ? kSdDat0GpioRevisionA : kSdDat0GpioRevisionB,
+             kSdCsGpio,
+             revision != SdBoardRevision::RevisionA) {}
 
 const char* SdCard::bus_mode_name() const {
     return mode_ == SdBusMode::Spi ? "SPI" : "native 1-bit";

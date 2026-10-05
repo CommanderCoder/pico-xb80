@@ -185,9 +185,13 @@ This project also benefited from discussions and examples from several AI system
 ## The software:
 * SD Card interface software (initially from prompts to Claude.ai).  The Olimex Pico2-XXL has two variants.  One use 1-bit communication protocol and the other uses the 4-bit protocol.  My board used 1-bit so the software was originally built for this.
 
-  There are now two transports, picked at startup by `SdCard::initialize()`:
-  * **SPI** - preferred.  The card is driven by one of the RP2350 SPI blocks, so a sector moves as 512 hardware-clocked bytes at 12.5MHz rather than 4096 bit-banged GPIO transitions.  This needs CS on a GPIO and CLK/DI/DO on pins that can carry the SCK/TX/RX functions of a single SPI instance - on this board GPIO9/10/11/24 are all `spi1`, so they qualify.  The card is probed for SPI first, because it latches SPI mode on the first `CMD0` it sees with CS low and will not leave again until power is cycled.
-  * **1-bit native SD** - the fallback and the original implementation, used whenever the wiring cannot carry SPI or the card does not answer the SPI probe.  CMD/CLK/DAT0 are bit-banged at roughly 500kHz with the CPU busy-waiting for the whole sector.
+  `SdCard::detect_board_revision()` works out which board it is running on first, since the two Olimex revisions wire the card differently.  Revision A puts SD_DAT0 on GPIO12 and leaves R24 - the link between GPIO9 and the card's CS pin - unpopulated, so it can only be bit-banged.  Revision B moved SD_DAT0 to GPIO24 (GPIO12 collides with the RP2350's HSTX/HDMI block) and ships wired for SPI.  The check is electrical, not a conversation with the card: it looks for the 10k pull-up the SD_DAT0 net carries on the board, so it needs no card in the socket and sends no commands - which matters, because a `CMD0` seen with CS low latches a card into SPI mode until it is next powered down.
+
+  That gives two transports, picked at startup by `SdCard::initialize()`:
+  * **SPI** - used on Revision B.  The card is driven by one of the RP2350 SPI blocks, so a sector moves as 512 hardware-clocked bytes at 12.5MHz rather than 4096 bit-banged GPIO transitions.  This needs CS on a GPIO and CLK/DI/DO on pins that can carry the SCK/TX/RX functions of a single SPI instance - GPIO9/10/11/24 are all `spi1`, so they qualify.
+  * **1-bit native SD** - used on Revision A, and the fallback everywhere else: whenever the wiring cannot carry SPI or the card does not answer the SPI probe.  CMD/CLK/DAT0 are bit-banged at roughly 500kHz with the CPU busy-waiting for the whole sector.
+
+  If the detected wiring fails to initialise, the other revision's wiring is tried before giving up.
 
 * Expansion Bus - provides a shared memory on the address bus.  [Pico PIOs](https://www.raspberrypi.com/news/what-is-pio/) rapidly reads addresses and data which several DMAs pump in and out of 64Kx16bit words (128Kb).
   * heavily influenced by [ATOM-DVI](https://github.com/cmoulang/Atom-DVI) after speaking with Chris about his project at an ABUG event. 
