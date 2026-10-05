@@ -237,7 +237,7 @@
       "internal_id": "",
       "mfg": "",
       "mpn": "",
-      "sch_revision": ""
+      "sch_revision": "v1.0u"
     },
     "layer_pairs": [],
     "layer_presets": [],
@@ -485,7 +485,7 @@
     "pinned_symbol_libs": []
   },
   "meta": {
-    "filename": "ver1.kicad_pro",
+    "filename": "xb80_universal.kicad_pro",
     "version": 3
   },
   "net_settings": {
@@ -660,7 +660,7 @@
     "subpart_id_separator": 0,
     "top_level_sheets": [
       {
-        "filename": "ver1.kicad_sch",
+        "filename": "xb80_universal.kicad_sch",
         "name": "Root",
         "uuid": "729215d4-2f70-4991-9139-3b82d774c98b"
       }

@@ -2,12 +2,14 @@
 
 ## Revision 1 schematic
 
-The [`output/ver1.pdf`](output/ver1.pdf) file contains the first hardware revision schamatic design for the board.
+The [`xb80_universal.pdf`](xb80_universal.pdf) file contains the first hardware revision schamatic design for the board.
 
-![output/ver1.pdf](output/ver1.jpg)
+![PCB](xb80_universal.jpg)
 
 ## Revision 1 visual reference
 
 Render of the assembled first-revision board layout and component placement for quick visual reference.
 
-![ver1.png](./ver1.png)
+![SCHEMATIC](./xb80_universal.png)
+
+Pico on top with headers underneath.  Ribbon cable underneath that.

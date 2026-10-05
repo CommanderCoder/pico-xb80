@@ -7,5 +7,7 @@ build
 tools/sjasmplus
 sharp-mz80k/FD_rom.h
 minicom.cap
-HARDWARE/*-backups
-HARDWARE/*.kicad_prl
+HARDWARE/*/*backups
+HARDWARE/**/*.kicad_prl
+HARDWARE/*/output/
+HARDWARE/**/.history/

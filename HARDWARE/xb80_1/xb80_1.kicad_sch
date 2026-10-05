@@ -6274,7 +6274,7 @@
 			)
 		)
 		(instances
-			(project "ver1"
+			(project "xb80_1"
 				(path "/729215d4-2f70-4991-9139-3b82d774c98b"
 					(reference "H1")
 					(unit 1)
@@ -6499,7 +6499,7 @@
 			(uuid "84ea3230-6073-4f4c-9bdf-23bddbe7d0f1")
 		)
 		(instances
-			(project "ver1"
+			(project "xb80_1"
 				(path "/729215d4-2f70-4991-9139-3b82d774c98b"
 					(reference "XB80")
 					(unit 1)
@@ -6577,7 +6577,7 @@
 			(uuid "f8a0e467-0ba1-49f5-bc33-b199c4230dd6")
 		)
 		(instances
-			(project "ver1"
+			(project "xb80_1"
 				(path "/729215d4-2f70-4991-9139-3b82d774c98b"
 					(reference "#PWR01")
 					(unit 1)
@@ -6653,7 +6653,7 @@
 			)
 		)
 		(instances
-			(project "ver1"
+			(project "xb80_1"
 				(path "/729215d4-2f70-4991-9139-3b82d774c98b"
 					(reference "H2")
 					(unit 1)
@@ -6729,7 +6729,7 @@
 			)
 		)
 		(instances
-			(project "ver1"
+			(project "xb80_1"
 				(path "/729215d4-2f70-4991-9139-3b82d774c98b"
 					(reference "H4")
 					(unit 1)
@@ -6805,7 +6805,7 @@
 			)
 		)
 		(instances
-			(project "ver1"
+			(project "xb80_1"
 				(path "/729215d4-2f70-4991-9139-3b82d774c98b"
 					(reference "H3")
 					(unit 1)
@@ -7000,7 +7000,7 @@
 			(uuid "a4eeda8e-8525-479a-a64c-375bdd979349")
 		)
 		(instances
-			(project "ver1"
+			(project "xb80_1"
 				(path "/729215d4-2f70-4991-9139-3b82d774c98b"
 					(reference "EXT2")
 					(unit 1)
@@ -7077,7 +7077,7 @@
 			(uuid "129a7388-65ed-4ae4-b1ba-c468cc26abe6")
 		)
 		(instances
-			(project "ver1"
+			(project "xb80_1"
 				(path "/729215d4-2f70-4991-9139-3b82d774c98b"
 					(reference "#FLG01")
 					(unit 1)
@@ -7273,7 +7273,7 @@
 			(uuid "aecfb39e-ab00-4592-9392-2eaac6d2fa4f")
 		)
 		(instances
-			(project "ver1"
+			(project "xb80_1"
 				(path "/729215d4-2f70-4991-9139-3b82d774c98b"
 					(reference "EXT1")
 					(unit 1)

@@ -193,7 +193,7 @@
 		(property ki_fp_filters "Connector*:*_2x??_*")
 		(path "/51bbbec5-c46d-41b8-a91a-bd2ad4f33530")
 		(sheetname "/")
-		(sheetfile "ver1.kicad_sch")
+		(sheetfile "xb80_1.kicad_sch")
 		(units
 			(unit
 				(name "A")
@@ -1120,7 +1120,7 @@
 		(property ki_fp_filters "MountingHole*")
 		(path "/7902365d-8dbb-4c0a-a26e-3c8d0bfbaa8b")
 		(sheetname "/")
-		(sheetfile "ver1.kicad_sch")
+		(sheetfile "xb80_1.kicad_sch")
 		(units
 			(unit
 				(name "A")
@@ -1239,7 +1239,7 @@
 		(property ki_fp_filters "Connector*:*_2x??_*")
 		(path "/dcaf7eb1-c4ea-40ca-926c-7ba855950139")
 		(sheetname "/")
-		(sheetfile "ver1.kicad_sch")
+		(sheetfile "xb80_1.kicad_sch")
 		(units
 			(unit
 				(name "A")
@@ -1953,7 +1953,7 @@
 		(property ki_fp_filters "Connector*:*_2x??_*")
 		(path "/d516c539-c37e-4159-9090-e1f01a150484")
 		(sheetname "/")
-		(sheetfile "ver1.kicad_sch")
+		(sheetfile "xb80_1.kicad_sch")
 		(units
 			(unit
 				(name "A")
@@ -2664,7 +2664,7 @@
 		(property ki_fp_filters "MountingHole*")
 		(path "/98880eb0-9357-4847-892e-1bcd6c82d558")
 		(sheetname "/")
-		(sheetfile "ver1.kicad_sch")
+		(sheetfile "xb80_1.kicad_sch")
 		(units
 			(unit
 				(name "A")
@@ -2780,7 +2780,7 @@
 		(property ki_fp_filters "MountingHole*")
 		(path "/129ac28c-b0a5-4d58-8f24-a5fb537517f6")
 		(sheetname "/")
-		(sheetfile "ver1.kicad_sch")
+		(sheetfile "xb80_1.kicad_sch")
 		(units
 			(unit
 				(name "A")
@@ -2896,7 +2896,7 @@
 		(property ki_fp_filters "MountingHole*")
 		(path "/cc5cccbb-dbb1-4850-a770-af2d829a9c95")
 		(sheetname "/")
-		(sheetfile "ver1.kicad_sch")
+		(sheetfile "xb80_1.kicad_sch")
 		(units
 			(unit
 				(name "A")
