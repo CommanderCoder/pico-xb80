@@ -33,7 +33,7 @@ void list_files_local(const char* extension, const char* rootdir)
     return;
   }
 
-  _DEBUG("--- files on SD (Pico-local listing) ---");
+  _DEBUG("--- files on SD (Pico-local listing) ---\n");
   int count = 0;
   while (1) {
     result = f_readdir(&dir, &fno);
@@ -41,14 +41,18 @@ void list_files_local(const char* extension, const char* rootdir)
       break;
     }
 
+    // Skip hidden files and directories
     int len = strlen(fno.fname);
-    if (len == 0 || fno.fname[0] == '.' || len < 4) {
+    if (len == 0 || fno.fname[0] == '.' ) {
       continue;
     }
-    const char *ext = &fno.fname[len - 3];
-    if (strncasecmp(ext, extension, 3) != 0)
-    {
-      continue;
+
+    // extension check: skip files that don't match the requested extension
+    if (extension != nullptr && extension[0] != '\0') {
+      int ext_len = strlen(extension);
+      if (len < ext_len + 1 || fno.fname[len - ext_len - 1] != '.' || strncasecmp(fno.fname + len - ext_len, extension, ext_len) != 0) {
+        continue;
+      }
     }
 
     _DEBUG("  %s  (%lu bytes)\n", fno.fname, (unsigned long)fno.fsize);

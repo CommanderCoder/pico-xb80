@@ -195,6 +195,9 @@ void sdinit(void){
 
   
   if (!sd_missing) {
+    _DEBUG("Listing all files in root directory\n");
+    list_files_local("","/");
+    _DEBUG("Listing .mzf files in %s directory\n", ROOT_DIR);
     list_files_local("mzf", ROOT_DIR); // Pico-side listing as a mount sanity check
   }
 
