@@ -138,8 +138,8 @@ startw:
     ;   bits 24-27 = reserved
     ;   bit  28    = NWR
     ;   bit  29    = NRD
-    ;   bit  30    = NMREQ
-    ;   bit  31    = NIOREQ
+    ;   bit  30    = NIOREQ
+    ;   bit  31    = NMREQ
     in      pins, 32
 
     ; Drop the low 16 bits (A0-A15) so D0-D7+control land back in
