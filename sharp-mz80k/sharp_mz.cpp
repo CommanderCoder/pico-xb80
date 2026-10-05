@@ -41,11 +41,18 @@ char ROOT_DIR[12] = "/MZ_FD"; // Root directory for MZF files
 
 byte s_data[260];
 
-// SDCard slot pin assignments
+// SDCard slot pin assignments.
+//
+// These are not free choices: CLK/CMD/DAT0 land on the SCK/TX/RX pins of
+// spi1, which is what lets SdCard run the card over hardware SPI instead of
+// bit-banging it (see the comment at the top of sd_card.h). GPIO12 - the DAT0
+// pin on Revision A boards - is also an spi1 RX pin, so either revision can
+// use SPI.
 namespace {
-  constexpr uint kClkPin = 10;
-  constexpr uint kCmdPin = 11;
-  constexpr uint kDat0Pin = 12; // pin 12 on Revision A boards, pin 24 on Revision B boards
+  constexpr uint kCsPin = 9;    // SD pin 1: CS in SPI mode, DAT3 in native mode
+  constexpr uint kClkPin = 10;  // SD pin 5: CLK            (spi1 SCK)
+  constexpr uint kCmdPin = 11;  // SD pin 2: CMD / DI       (spi1 TX)
+  constexpr uint kDat0Pin = 24; // SD pin 7: DAT0 / DO      (spi1 RX) - GPIO12 on Revision A boards
 }  // namespace
 
 
@@ -70,14 +77,14 @@ bool InitSDFatFs() {
   SdCard* sd = nullptr;
 
   if (sd == nullptr) {
-    sd = new SdCard(kCmdPin, kClkPin, kDat0Pin);
+    sd = new SdCard(kCmdPin, kClkPin, kDat0Pin, kCsPin);
   }
 
   if (!sd->initialize()) {
     _DEBUG("SD: initialization failed\n");
     return false;
   }
-  _DEBUG("SD: initialization succeeded\n");
+  _DEBUG("SD: initialization succeeded (%s mode)\n", sd->bus_mode_name());
 
   if (g_fatfs == nullptr) {
     g_fatfs = new FatFsInterface(*sd);

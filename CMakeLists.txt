@@ -98,7 +98,8 @@ target_link_libraries(pico-xb80
         pico_stdlib
         pico_rand
         hardware_pio 
-        hardware_dma)
+        hardware_dma
+        hardware_spi)
 
 # Add the standard include files to the build
 target_include_directories(pico-xb80 PRIVATE

@@ -22,6 +22,12 @@ constexpr uint32_t kSectorSize = 512;
 constexpr uint32_t kClockHalfPeriodUsInit = 20;
 constexpr uint32_t kClockHalfPeriodUsData = 1;
 
+// SPI mode clocks: identification is only guaranteed to work at 100-400kHz,
+// data transfers then run as fast as the wiring stands (the card's own SPI
+// ceiling is 25MHz).
+constexpr uint kSpiBaudrateInit = 400'000;
+constexpr uint kSpiBaudrateData = 12'500'000;
+
 constexpr uint8_t kCmd0 = 0;
 constexpr uint8_t kCmd2 = 2;
 constexpr uint8_t kCmd8 = 8;
@@ -32,6 +38,7 @@ constexpr uint8_t kCmd24 = 24;
 constexpr uint8_t kCmd3 = 3;
 constexpr uint8_t kCmd7 = 7;
 constexpr uint8_t kCmd55 = 55;
+constexpr uint8_t kCmd58 = 58;  // READ_OCR, SPI mode only
 constexpr uint8_t kAcmd41 = 41;
 
 struct ParsedResponse48 {
@@ -373,10 +380,380 @@ bool write_data_block_1bit(uint clk_gpio,
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// SPI mode
+//
+// The same SD command set, but framed a byte at a time by the SPI block: six
+// bytes of command out, then an R1 status byte clocked in (plus four payload
+// bytes for R3/R7). The card leaves DO high whenever it has nothing to say,
+// so "reading" is really "shift out 0xFF and keep whatever comes back".
+// ---------------------------------------------------------------------------
+
+enum class SpiRole : uint { Rx = 0, Csn = 1, Sck = 2, Tx = 3 };
+
+// Bank-0 pinmap: FUNCSEL 1 (GPIO_FUNC_SPI) cycles RX, CSn, SCK, TX every four
+// GPIOs and alternates spi0/spi1 every eight, the whole way up GPIO0..47. A
+// given pin can therefore only ever carry one SPI role on one instance, which
+// is what makes SPI availability a property of the wiring rather than a
+// choice. Returns nullptr when this gpio cannot be `role`.
+spi_inst_t* spi_instance_for(uint gpio, SpiRole role) {
+    if (gpio >= NUM_BANK0_GPIOS) {
+        return nullptr;
+    }
+    if (static_cast<uint>(role) != (gpio & 3u)) {
+        return nullptr;
+    }
+    return ((gpio >> 3) & 1u) != 0 ? spi1 : spi0;
+}
+
+uint8_t spi_xfer(spi_inst_t* spi, uint8_t value) {
+    uint8_t received = 0xFF;
+    (void)spi_write_read_blocking(spi, &value, &received, 1);
+    return received;
+}
+
+// The card pulls DO low for as long as it is busy programming; 0xFF is idle.
+bool spi_wait_not_busy(spi_inst_t* spi, uint32_t timeout_ms) {
+    const absolute_time_t deadline = make_timeout_time_ms(timeout_ms);
+    do {
+        if (spi_xfer(spi, 0xFF) == 0xFF) {
+            return true;
+        }
+    } while (absolute_time_diff_us(get_absolute_time(), deadline) > 0);
+    return false;
+}
+
+// Returns the R1 status byte, or 0xFF if the card never answered.
+uint8_t spi_send_command(spi_inst_t* spi, uint8_t command, uint32_t argument) {
+    uint8_t frame[6] = {
+        static_cast<uint8_t>(0x40u | (command & 0x3Fu)),
+        static_cast<uint8_t>((argument >> 24) & 0xFFu),
+        static_cast<uint8_t>((argument >> 16) & 0xFFu),
+        static_cast<uint8_t>((argument >> 8) & 0xFFu),
+        static_cast<uint8_t>(argument & 0xFFu),
+        0,
+    };
+    // CRC is otherwise ignored in SPI mode, but CMD0 and CMD8 are checked -
+    // and crc7_sd produces the 0x95/0x87 they expect, so no special case.
+    frame[5] = static_cast<uint8_t>((crc7_sd(frame, 5) << 1) | 0x01u);
+    (void)spi_write_blocking(spi, frame, sizeof(frame));
+
+    // Ncr: the response lands within 8 bytes and is flagged by a clear bit 7.
+    for (int i = 0; i < 10; ++i) {
+        const uint8_t r1 = spi_xfer(spi, 0xFF);
+        if ((r1 & 0x80u) == 0) {
+            return r1;
+        }
+    }
+    return 0xFF;
+}
+
+// R3 (OCR) and R7 (CMD8 voltage echo) are an R1 byte plus a 32-bit payload.
+uint8_t spi_send_command_r3r7(spi_inst_t* spi, uint8_t command, uint32_t argument, uint32_t* payload) {
+    const uint8_t r1 = spi_send_command(spi, command, argument);
+    // A card rejecting the command as illegal sends no payload to collect.
+    if ((r1 & 0x04u) != 0) {
+        return r1;
+    }
+
+    uint8_t bytes[4] = {0, 0, 0, 0};
+    (void)spi_read_blocking(spi, 0xFF, bytes, sizeof(bytes));
+    if (payload != nullptr) {
+        *payload = (static_cast<uint32_t>(bytes[0]) << 24) |
+                   (static_cast<uint32_t>(bytes[1]) << 16) |
+                   (static_cast<uint32_t>(bytes[2]) << 8) |
+                   static_cast<uint32_t>(bytes[3]);
+    }
+    return r1;
+}
+
+bool spi_read_data_block(spi_inst_t* spi, uint8_t* buffer, size_t size) {
+    // Nac: wait for the 0xFE start token. Anything else with a clear top
+    // nibble is an error token (out of range, CC error, ECC failure, ...).
+    const absolute_time_t deadline = make_timeout_time_ms(300);
+    while (true) {
+        const uint8_t token = spi_xfer(spi, 0xFF);
+        if (token == 0xFEu) {
+            break;
+        }
+        if ((token & 0xF0u) == 0) {
+            _ERROR_PRINT("SD: SPI read error token 0x%02X\n", token);
+            return false;
+        }
+        if (absolute_time_diff_us(get_absolute_time(), deadline) <= 0) {
+            _ERROR_PRINT("SD: SPI read timed out waiting for data token\n");
+            return false;
+        }
+    }
+
+    (void)spi_read_blocking(spi, 0xFF, buffer, size);
+
+    uint8_t crc_bytes[2] = {0, 0};
+    (void)spi_read_blocking(spi, 0xFF, crc_bytes, sizeof(crc_bytes));
+    const uint16_t received = static_cast<uint16_t>((crc_bytes[0] << 8) | crc_bytes[1]);
+    const uint16_t computed = calculate_sd_crc16_fast(buffer, size);
+    // Data blocks always carry a real CRC16 - CMD59 only governs whether the
+    // card checks the ones we send - so a mismatch is a genuine error.
+    if (received != computed) {
+        _ERROR_PRINT("SD: SPI read CRC mismatch (card=0x%04X computed=0x%04X)\n", received, computed);
+        return false;
+    }
+    return true;
+}
+
+bool spi_write_data_block(spi_inst_t* spi, const uint8_t* buffer, size_t size) {
+    spi_xfer(spi, 0xFF);  // Nwr: one idle byte ahead of the start token
+
+    const uint8_t token = 0xFE;
+    (void)spi_write_blocking(spi, &token, 1);
+    (void)spi_write_blocking(spi, buffer, size);
+
+    const uint16_t crc = calculate_sd_crc16_fast(buffer, size);
+    const uint8_t crc_bytes[2] = {
+        static_cast<uint8_t>(crc >> 8),
+        static_cast<uint8_t>(crc & 0xFFu),
+    };
+    (void)spi_write_blocking(spi, crc_bytes, sizeof(crc_bytes));
+
+    // Data response token is xxx0sss1; sss = 010 is accepted, 101 a CRC
+    // error and 110 a write error.
+    uint8_t response = 0xFF;
+    for (int i = 0; i < 10; ++i) {
+        response = spi_xfer(spi, 0xFF);
+        if ((response & 0x11u) == 0x01u) {
+            break;
+        }
+    }
+    const uint8_t status = static_cast<uint8_t>((response >> 1) & 0x07u);
+    if (status != 0x02u) {
+        _ERROR_PRINT("SD: SPI write rejected, token=0x%02X status=0b%03u\n", response, status);
+        return false;
+    }
+
+    // DO stays low for as long as the card is programming the block.
+    if (!spi_wait_not_busy(spi, 1000)) {
+        _ERROR_PRINT("SD: SPI write timed out while the card was programming\n");
+        return false;
+    }
+
+    _DEBUG_PRINT("SD: SPI write accepted, CRC=0x%04X\n", crc);
+    return true;
+}
+
 }  // namespace
 
-SdCard::SdCard(uint cmd_gpio, uint clk_gpio, uint dat0_gpio)
-    : cmd_gpio_(cmd_gpio), clk_gpio_(clk_gpio), dat0_gpio_(dat0_gpio), rca_(0), high_capacity_(false) {}
+SdCard::SdCard(uint cmd_gpio, uint clk_gpio, uint dat0_gpio, uint cs_gpio, bool probe_spi)
+    : cmd_gpio_(cmd_gpio),
+      clk_gpio_(clk_gpio),
+      dat0_gpio_(dat0_gpio),
+      cs_gpio_(cs_gpio),
+      probe_spi_(probe_spi),
+      mode_(SdBusMode::Native1Bit),
+      spi_(nullptr),
+      rca_(0),
+      high_capacity_(false) {}
+
+const char* SdCard::bus_mode_name() const {
+    return mode_ == SdBusMode::Spi ? "SPI" : "native 1-bit";
+}
+
+// Probe SPI when the wiring allows it, otherwise stay on the native 1-bit
+// path. The order is forced by the card: it latches SPI mode on the first
+// CMD0 it sees with CS low and cannot leave again until power is cycled,
+// while native mode (CMD0 with CS high) can still be followed by an SPI
+// attempt. SPI-then-native is therefore the recoverable direction.
+bool SdCard::initialize() {
+    if (spi_wiring_supported()) {
+        if (initialize_spi()) {
+            mode_ = SdBusMode::Spi;
+            return true;
+        }
+        // If the card did answer CMD0 before failing later on, it is now
+        // latched into SPI mode and the native attempt below will fail too -
+        // that is as far as recovery goes without a power cycle.
+        _ERROR_PRINT("SD: SPI unavailable, falling back to native 1-bit mode\n");
+        release_spi();
+    }
+
+    mode_ = SdBusMode::Native1Bit;
+    return initialize_native();
+}
+
+bool SdCard::spi_wiring_supported() const {
+    if (!probe_spi_ || cs_gpio_ == kSdNoPin || cs_gpio_ >= NUM_BANK0_GPIOS) {
+        return false;
+    }
+    // CS is driven as a plain GPIO (see spi_select), so it only has to exist.
+    // CLK/DI/DO have to be the SCK/TX/RX pins of one and the same instance.
+    spi_inst_t* const sck = spi_instance_for(clk_gpio_, SpiRole::Sck);
+    spi_inst_t* const tx = spi_instance_for(cmd_gpio_, SpiRole::Tx);
+    spi_inst_t* const rx = spi_instance_for(dat0_gpio_, SpiRole::Rx);
+    return sck != nullptr && sck == tx && sck == rx;
+}
+
+void SdCard::spi_select() {
+    gpio_put(cs_gpio_, 0);
+    spi_xfer(spi_, 0xFF);  // lead-in byte once CS is asserted
+}
+
+void SdCard::spi_deselect() {
+    gpio_put(cs_gpio_, 1);
+    spi_xfer(spi_, 0xFF);  // trailing byte so the card lets go of DO
+}
+
+bool SdCard::initialize_spi() {
+    spi_ = spi_instance_for(clk_gpio_, SpiRole::Sck);
+    if (spi_ == nullptr) {
+        return false;
+    }
+
+    spi_init(spi_, kSpiBaudrateInit);
+    spi_set_format(spi_, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+    gpio_set_function(clk_gpio_, GPIO_FUNC_SPI);
+    gpio_set_function(cmd_gpio_, GPIO_FUNC_SPI);
+    gpio_set_function(dat0_gpio_, GPIO_FUNC_SPI);
+    gpio_pull_up(dat0_gpio_);  // DO floats while the card is deselected
+
+    // CS is bit-banged rather than handed to the SPI block's own CSn, which
+    // deasserts per transfer; SD needs it held across a whole command plus
+    // its response and data block.
+    gpio_init(cs_gpio_);
+    gpio_set_dir(cs_gpio_, GPIO_OUT);
+    gpio_put(cs_gpio_, 1);
+
+    auto fail = [this](const char* why) {
+        _ERROR_PRINT("SD: SPI probe failed - %s\n", why);
+        gpio_put(cs_gpio_, 1);
+        return false;
+    };
+
+    // >= 74 clocks with CS and DI high is the card's power-up wake sequence.
+    for (int i = 0; i < 10; ++i) {
+        spi_xfer(spi_, 0xFF);
+    }
+
+    gpio_put(cs_gpio_, 0);
+    spi_xfer(spi_, 0xFF);  // lead-in byte once CS is asserted
+
+    // CMD0 received with CS low is what selects SPI mode. A card that will
+    // not answer here is exactly the signal to fall back to native 1-bit.
+    bool idle = false;
+    for (int i = 0; i < 10 && !idle; ++i) {
+        idle = (spi_send_command(spi_, kCmd0, 0) == 0x01u);
+    }
+    if (!idle) {
+        return fail("no response to CMD0");
+    }
+
+    uint32_t r7 = 0;
+    if (spi_send_command_r3r7(spi_, kCmd8, 0x1AA, &r7) != 0x01u || (r7 & 0xFFFu) != 0x1AAu) {
+        return fail("CMD8 rejected (pre-2.0 card?)");
+    }
+
+    // ACMD41 with HCS set; the card clears R1's idle bit once it is ready.
+    bool ready = false;
+    for (int i = 0; i < 200 && !ready; ++i) {
+        (void)spi_send_command(spi_, kCmd55, 0);
+        ready = (spi_send_command(spi_, kAcmd41, 0x40000000UL) == 0x00u);
+        if (!ready) {
+            sleep_ms(10);
+        }
+    }
+    if (!ready) {
+        return fail("ACMD41 timeout");
+    }
+
+    uint32_t ocr = 0;
+    if (spi_send_command_r3r7(spi_, kCmd58, 0, &ocr) != 0x00u) {
+        return fail("CMD58 failed");
+    }
+    // CCS (OCR bit 30) set means the card is addressed in blocks, not bytes.
+    high_capacity_ = (ocr & (1u << 30)) != 0;
+
+    if (!high_capacity_ && spi_send_command(spi_, kCmd16, kSectorSize) != 0x00u) {
+        return fail("CMD16 failed");
+    }
+
+    gpio_put(cs_gpio_, 1);
+    spi_xfer(spi_, 0xFF);
+
+    // Identification done - wind the clock up for data transfers.
+    const uint baudrate = spi_set_baudrate(spi_, kSpiBaudrateData);
+
+    // RCA only exists on the native bus; in SPI mode CS does the selecting.
+    rca_ = 0;
+    _DEBUG_PRINT("\nSD: SPI init done (%s, %u Hz)\n", high_capacity_ ? "SDHC/SDXC" : "SDSC", baudrate);
+    return true;
+}
+
+void SdCard::release_spi() {
+    if (spi_ != nullptr) {
+        spi_deinit(spi_);
+        spi_ = nullptr;
+    }
+    // Hand the pins back as plain GPIOs for the bit-banged native path.
+    gpio_set_function(clk_gpio_, GPIO_FUNC_SIO);
+    gpio_set_function(cmd_gpio_, GPIO_FUNC_SIO);
+    gpio_set_function(dat0_gpio_, GPIO_FUNC_SIO);
+}
+
+bool SdCard::read_sector_spi(uint32_t lba, uint8_t* buffer, size_t size) {
+    const uint32_t argument = high_capacity_ ? lba : (lba * kSectorSize);
+
+    spi_select();
+    if (!spi_wait_not_busy(spi_, 500)) {
+        _ERROR_PRINT("SD: SPI card still busy before CMD17\n");
+        spi_deselect();
+        return false;
+    }
+
+    const uint8_t r1 = spi_send_command(spi_, kCmd17, argument);
+    if (r1 != 0x00u) {
+        _ERROR_PRINT("SD: SPI CMD17 failed (r1=0x%02X)\n", r1);
+        spi_deselect();
+        return false;
+    }
+
+    const bool ok = spi_read_data_block(spi_, buffer, size);
+    spi_deselect();
+    return ok;
+}
+
+bool SdCard::write_sector_spi(uint32_t lba, const uint8_t* buffer, size_t size) {
+    const uint32_t argument = high_capacity_ ? lba : (lba * kSectorSize);
+
+    spi_select();
+    if (!spi_wait_not_busy(spi_, 500)) {
+        _ERROR_PRINT("SD: SPI card still busy before CMD24\n");
+        spi_deselect();
+        return false;
+    }
+
+    const uint8_t r1 = spi_send_command(spi_, kCmd24, argument);
+    if (r1 != 0x00u) {
+        _ERROR_PRINT("SD: SPI CMD24 failed (r1=0x%02X)\n", r1);
+        spi_deselect();
+        return false;
+    }
+
+    bool ok = spi_write_data_block(spi_, buffer, size);
+
+    // The write is only really done once the card reports a clean status.
+    if (ok) {
+        uint32_t status = 0;
+        // R2: an R1 byte plus a second status byte, both zero when happy.
+        const uint8_t r2_first = spi_send_command(spi_, kCmd13, 0);
+        const uint8_t r2_second = spi_xfer(spi_, 0xFF);
+        status = (static_cast<uint32_t>(r2_first) << 8) | r2_second;
+        if (status != 0) {
+            _ERROR_PRINT("SD: SPI CMD13 error status=0x%04X\n", status);
+            ok = false;
+        }
+    }
+
+    spi_deselect();
+    return ok;
+}
 
 bool SdCard::wait_ready(uint32_t timeout_us) {
     const absolute_time_t deadline = make_timeout_time_us(timeout_us);
@@ -488,13 +865,16 @@ bool SdCard::send_command_r6(uint8_t command, uint32_t argument, uint32_t* paylo
     return true;
 }
 
-bool SdCard::initialize() {
-#ifdef PICO_SD_DAT3_PIN
-    _DEBUG_PRINT("SD: initializing with DAT3 pull-up on GPIO %u\n", PICO_SD_DAT3_PIN);
-    gpio_init(PICO_SD_DAT3_PIN);
-    gpio_set_dir(PICO_SD_DAT3_PIN, GPIO_IN);
-    gpio_pull_up(PICO_SD_DAT3_PIN);
-#endif
+bool SdCard::initialize_native() {
+    // DAT3 is the same physical pin as CS and has to be high when CMD0 goes
+    // out, or the card would select SPI mode. Pull it up rather than drive
+    // it: on the native bus it is a data line the card may own.
+    if (cs_gpio_ != kSdNoPin) {
+        _DEBUG_PRINT("SD: initializing with DAT3 pull-up on GPIO %u\n", cs_gpio_);
+        gpio_init(cs_gpio_);
+        gpio_set_dir(cs_gpio_, GPIO_IN);
+        gpio_pull_up(cs_gpio_);
+    }
 
     gpio_init(clk_gpio_);
     gpio_set_dir(clk_gpio_, GPIO_OUT);
@@ -581,6 +961,12 @@ bool SdCard::read_sector(uint32_t lba, uint8_t* buffer, size_t size) {
         return false;
     }
 
+    return mode_ == SdBusMode::Spi ? read_sector_spi(lba, buffer, size)
+                                   : read_sector_native(lba, buffer, size);
+}
+
+bool SdCard::read_sector_native(uint32_t lba, uint8_t* buffer, size_t size) {
+
     const uint32_t argument = high_capacity_ ? lba : (lba * kSectorSize);
     uint32_t status = 0;
     if (!send_command_r1(kCmd17, argument, &status)) {
@@ -595,6 +981,12 @@ bool SdCard::write_sector(uint32_t lba, const uint8_t* buffer, size_t size) {
     if (buffer == nullptr || size != kSectorSize) {
         return false;
     }
+
+    return mode_ == SdBusMode::Spi ? write_sector_spi(lba, buffer, size)
+                                   : write_sector_native(lba, buffer, size);
+}
+
+bool SdCard::write_sector_native(uint32_t lba, const uint8_t* buffer, size_t size) {
 
     const uint32_t argument = high_capacity_ ? lba : (lba * kSectorSize);
     uint32_t status = 0;
